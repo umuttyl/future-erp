@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 
 sys.path.append(str(Path(__file__).resolve().parents[1]))
 
-from app.core.db import SessionLocal, init_db
+from app.core.db import SessionLocal
 from app.models.product import Product
 from app.models.sales import SalesItem, SalesRecord
 
@@ -21,7 +21,7 @@ def _d(value: str) -> Decimal:
 
 
 def seed_sales(*, days: int = 60, records_per_day_min: int = 0, records_per_day_max: int = 2) -> None:
-    init_db()
+    # ÖN KOŞUL: tablolar `alembic upgrade head` ile oluşturulmuş olmalı.
     db: Session = SessionLocal()
     try:
         products = list(db.scalars(select(Product)).all())

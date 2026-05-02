@@ -1,8 +1,12 @@
 """Geliştirme için zengin örnek veri seed script'i.
 
+ÖN KOŞUL: Tablolar Alembic migration'ları ile oluşturulmuş olmalı:
+    alembic upgrade head
+
 Kullanım:
     python scripts/seed_data.py            # ek verileri üret (tabloyu koru)
     python scripts/seed_data.py --reset    # DB'yi sıfırla ve yeniden doldur
+                                            # (DEV ONLY — drop_all + create_all)
 """
 from __future__ import annotations
 
@@ -18,7 +22,7 @@ from sqlalchemy.orm import Session
 
 sys.path.append(str(Path(__file__).resolve().parents[1]))
 
-from app.core.db import SessionLocal, engine, init_db  # noqa: E402
+from app.core.db import SessionLocal, engine  # noqa: E402
 from app.models.base import Base  # noqa: E402
 from app.models.product import Product  # noqa: E402
 from app.models.sales import SalesItem, SalesRecord  # noqa: E402
@@ -223,9 +227,8 @@ def main() -> None:
     args = parser.parse_args()
 
     if args.reset:
+        # DEV-ONLY hızlı sıfırlama. Production için Alembic migration kullan.
         _reset_database()
-    else:
-        init_db()
 
     db: Session = SessionLocal()
     try:
