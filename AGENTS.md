@@ -183,7 +183,7 @@ Roller:
 
 | Faz | İçerik | Durum |
 |---|---|---|
-| **0** | Hafıza sistemi + Git + eklentiler + Alembic + seed iyileştirme + logging + test iskeleti | Aktif |
+| **0** | Git + eklentiler + Alembic + seed + logging + pytest + Vitest iskeleti | Tamamlandı |
 | **1** | Auth + RBAC + multi-tenant + Postgres'e geçiş + admin/manager/employee panelleri | Bekliyor |
 | **2** | CRM + Satınalma + Muhasebe (light) + Çoklu depo + HR + Doc + Raporlama + Bildirim | Bekliyor |
 | **3** | TR lokalizasyon + e-Fatura + Agentic NLP + Excel auto-import + Anomali + WhatsApp bot + Perakende şablonu | Bekliyor |
@@ -200,7 +200,8 @@ Detay için: `c:\Users\pc\.cursor\plans\future_erp_*.plan.md`.
 - DB config: [app/core/db.py](app/core/db.py)
 - Frontend giriş: [frontend/src/App.tsx](frontend/src/App.tsx)
 - API client: [frontend/src/lib/api.ts](frontend/src/lib/api.ts)
-- Seed scriptleri: [scripts/seed_data.py](scripts/seed_data.py)
+- Pytest: kök `pytest` (geliştirme: `requirements-dev.txt`).
+- Vitest: `cd frontend && npm run test`.
 
 ---
 

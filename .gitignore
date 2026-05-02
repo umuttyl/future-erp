@@ -27,6 +27,7 @@ build/
 node_modules/
 frontend/dist/
 frontend/dist-ssr/
+frontend/coverage/
 *.local
 
 # ---- Environment & Secrets ----

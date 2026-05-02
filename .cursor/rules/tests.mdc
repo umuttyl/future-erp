@@ -9,7 +9,8 @@ alwaysApply: false
 ## Backend (pytest)
 - Test dosyasi `tests/` altinda, `test_*.py` adlandirmasi.
 - Fixture'lar `tests/conftest.py` icinde paylasilan.
-- DB testi: in-memory SQLite veya ayri Postgres test DB. Production DB'ye DOKUNMA.
+- Gelistirme bagimliligi: `requirements-dev.txt` (`pytest`, `httpx`).
+- DB testi: `tests/conftest.py` ile in-memory SQLite (`StaticPool` + `Base.metadata.create_all`). Production'a baglanma; testler dosya SQLite `.env`'e yazmaz (`get_db` override).
 - `factory_boy` ile test verisi (`ProductFactory`, `UserFactory`).
 
 ```python
@@ -33,6 +34,7 @@ def test_list_products_filtered_by_tenant(client, tenant_a, tenant_b):
 - RBAC: izinsiz role 403 alir testi.
 
 ## Frontend (Vitest)
+- `vitest.config.ts` ile `vite.config.ts` ayri (`mergeConfig`); `npm run build` icin `vite.config.ts`'de `test` alani kullanma.
 - `*.test.tsx` component'in yaninda.
 - React Testing Library kullan.
 - API'yi mock'la (`msw` veya `vi.mock`).

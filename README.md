@@ -25,7 +25,7 @@ Future_Erp/
 │   └── services/         # İş mantığı
 ├── frontend/             # React 19 + Vite + TS
 ├── migrations/           # Alembic migration'ları
-├── scripts/              # Seed, yardımcı scriptler
+├── tests/                # pytest API / servis testleri
 └── AGENTS.md             # AI agent talimatları (proje vizyonu, kurallar)
 ```
 
@@ -43,6 +43,8 @@ Future_Erp/
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
 pip install -r requirements.txt
+# Testler için (pytest, httpx):
+pip install -r requirements-dev.txt
 ```
 
 ### Frontend
@@ -121,6 +123,25 @@ npm run dev
 ```
 
 UI: http://localhost:5173
+
+## Test
+
+### Backend — pytest
+
+```powershell
+.\.venv\Scripts\Activate.ps1
+pytest
+```
+
+`tests/conftest.py` ortak in-memory SQLite kullanır; `.env` ile tanımlı dosya veritabanına yazmaz.
+
+### Frontend — Vitest
+
+```powershell
+cd frontend
+npm run test          # tek sefer
+npm run test:watch    # izleme
+```
 
 ## Geliştirici kuralları
 
