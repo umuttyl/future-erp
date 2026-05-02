@@ -124,8 +124,8 @@ Roller:
 - **SQLAlchemy 2.0:** `Mapped[Type]` + `mapped_column(...)`. Eski Declarative API yok.
 - **Pydantic v2:** `BaseModel`, `model_config = ConfigDict(from_attributes=True)`.
 - **Async tercihi:** Tüm I/O async. CPU-yoğun (Prophet, image) sync olabilir.
-- **Hatalar:** `app/core/exceptions.py`'daki sınıfları raise et. Route'ta try/except YOK.
-- **Logging:** `structlog` (Faz 0e sonrası). `print()` yasak.
+- **Hatalar:** `app/core/exceptions.py` sınıflarını kullan. Servis bazen `ValueError`/`RuntimeError` fırlatır; route’da bunları yakalayıp `ValidationException` (veya ilgili `AppException`) ile sarmalayabilirsin. Geniş `except Exception:` route’ta yok (`main.py` beklenmeyenleri loglar ve 500 döner).
+- **Logging:** `structlog` + `app/core/logging.py`; `configure_logging()` `main` lifespan’da. ENV=`prod` iken JSON satırı; aksi konsol renkli. `print()` yasak.
 
 ### Frontend (TypeScript)
 - **Strict mode:** `tsconfig` strict açık.

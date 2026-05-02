@@ -5,6 +5,7 @@ import {
   formatCurrency,
   formatDate,
   formatNumber,
+  getApiErrorMessage,
   type Product,
   type SalesRecord,
 } from '../lib/api'
@@ -56,7 +57,7 @@ export function SalesPage() {
         setProducts(prodRes.data)
       } catch (e: any) {
         if (!alive) return
-        setError(e?.response?.data?.detail ?? e?.message ?? 'Yükleme başarısız')
+        setError(getApiErrorMessage(e, 'Yükleme başarısız'))
       } finally {
         if (alive) setLoading(false)
       }

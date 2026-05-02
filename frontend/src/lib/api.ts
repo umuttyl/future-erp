@@ -5,6 +5,18 @@ export const api = axios.create({
   timeout: 20_000,
 })
 
+/** FastAPI global handler ``{ error: { code, message } }``; legacy ``detail`` desteklenir. */
+export function getApiErrorMessage(error: unknown, fallback: string): string {
+  if (axios.isAxiosError(error)) {
+    const raw = error.response?.data as { error?: { message?: string }; detail?: unknown } | undefined
+    if (raw?.error?.message != null) return String(raw.error.message)
+    const detail = raw?.detail
+    if (typeof detail === 'string') return detail
+  }
+  if (error instanceof Error) return error.message
+  return fallback
+}
+
 export type DailySalesPoint = {
   date: string
   quantity: number

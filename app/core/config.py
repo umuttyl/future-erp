@@ -6,6 +6,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Settings(BaseSettings):
     PROJECT_NAME: str = "Future ERP AI"
     ENV: str = "dev"
+    LOG_LEVEL: str = "INFO"
     DATABASE_URL: str = "postgresql+psycopg://postgres:postgres@localhost:5432/future_erp_ai"
     AUTO_CREATE_DB: bool = False
     OPENAI_API_KEY: Optional[str] = None

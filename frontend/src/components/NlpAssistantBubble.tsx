@@ -4,6 +4,7 @@ import {
   api,
   formatCurrency,
   formatNumber,
+  getApiErrorMessage,
   type NlpQueryResponse,
 } from '../lib/api'
 
@@ -48,7 +49,7 @@ export function NlpAssistantBubble() {
         { id: `a-${Date.now()}`, role: 'assistant', kind: 'result', payload: res.data },
       ])
     } catch (e: any) {
-      const detail = e?.response?.data?.detail ?? e?.message ?? 'İstek başarısız'
+      const detail = getApiErrorMessage(e, 'İstek başarısız')
       setMessages((m) => [
         ...m,
         { id: `e-${Date.now()}`, role: 'assistant', kind: 'error', text: detail },

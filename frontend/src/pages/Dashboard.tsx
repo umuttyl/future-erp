@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 
 import { Area, AreaChart, CartesianGrid, Legend, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
 
-import { api, type DailySalesPoint, type ForecastResult } from '../lib/api'
+import { api, getApiErrorMessage, type DailySalesPoint, type ForecastResult } from '../lib/api'
 
 type DashboardPoint = {
   date: string
@@ -36,7 +36,7 @@ export function DashboardPage() {
         setForecasts(f.data)
       } catch (e: any) {
         if (!alive) return
-        setError(e?.message ?? 'Load failed')
+        setError(getApiErrorMessage(e, 'Yükleme başarısız'))
       } finally {
         if (!alive) return
         setLoading(false)

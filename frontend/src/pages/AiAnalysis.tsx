@@ -2,7 +2,6 @@ import { useEffect, useMemo, useState } from 'react'
 
 import {
   Area,
-  AreaChart,
   CartesianGrid,
   Legend,
   Line,
@@ -18,6 +17,7 @@ import {
   formatCurrency,
   formatDate,
   formatNumber,
+  getApiErrorMessage,
   type AiHighlight,
   type AiInsights,
   type DailySalesPoint,
@@ -67,7 +67,7 @@ export function AiAnalysisPage() {
       const { data } = await api.get<AiInsights>('/ai/insights')
       setInsights(data)
     } catch (e: any) {
-      setInsightsError(e?.response?.data?.detail ?? e?.message ?? 'AI özeti yüklenemedi')
+      setInsightsError(getApiErrorMessage(e, 'AI özeti yüklenemedi'))
     } finally {
       setInsightsLoading(false)
     }
@@ -127,7 +127,7 @@ export function AiAnalysisPage() {
       await api.post('/forecast/prophet/run', { horizon_days: 30 })
       await loadSupporting()
     } catch (e: any) {
-      alert(e?.response?.data?.detail ?? e?.message ?? 'Tahmin çalıştırılamadı')
+      alert(getApiErrorMessage(e, 'Tahmin çalıştırılamadı'))
     } finally {
       setForecastBusy(false)
     }
@@ -144,7 +144,7 @@ export function AiAnalysisPage() {
       const { data } = await api.post<NlpQueryResponse>('/nlp/query', { text: q })
       setQResult(data)
     } catch (e: any) {
-      setQError(e?.response?.data?.detail ?? e?.message ?? 'Soru çalıştırılamadı')
+      setQError(getApiErrorMessage(e, 'Soru çalıştırılamadı'))
     } finally {
       setQLoading(false)
     }

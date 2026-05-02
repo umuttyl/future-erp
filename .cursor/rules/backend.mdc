@@ -33,9 +33,15 @@ def list_products(svc: ProductsService = Depends()):
 - Service base sinifi (`TenantScopedService`) bu filtreyi otomatik yapar.
 
 ## Hata yonetimi
-- Route'ta `try/except` YOK.
-- `app/core/exceptions.py`'daki sinif raise et: `raise NotFoundException("Urun bulunamadi")`.
-- Global handler tek tip JSON donduruyor: `{"error": {"code": "...", "message": "..."}}`.
+- ``app/core/exceptions.py`` siniflari: ``NotFoundException``, ``ValidationException``, ...
+- Global handlerlar ``main.py`` icinde — tek tip JSON:
+  ``{"error": {"code": "...", "message": "..."}}``.
+- Route'ta ``try/except`` sadece service'ten gelen ``ValueError`` (veya kapali domain hatasi) yi
+  ``ValidationException`` ile sarmalamak icin; genis yakalama route'ta kullanma (``main`` yakalar).
+## Logging
+- ``structlog``: ``structlog.get_logger(__name__)``; ``configure_logging()`` lifespan icinde.
+- Dev: renkli konsol; ENV=``prod``: JSON satiri (``app/core/logging.py``).
+- ``print()`` YASAK; PII log'lama yasak.
 
 ## Migration
 - Sadece Alembic. `Base.metadata.create_all` SADECE test fixture'inda.
@@ -45,7 +51,3 @@ def list_products(svc: ProductsService = Depends()):
 ## Async tercihi
 - I/O bound (DB, HTTP) async.
 - CPU-bound (Prophet, pandas agir is) sync, gerekirse `run_in_executor`.
-
-## Logging
-- `structlog` kullan. `print()` YASAK.
-- Log'a PII (e-posta, T.C., sifre, token) yazma.

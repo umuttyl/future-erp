@@ -1,12 +1,12 @@
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from app.core.db import get_db
+from app.core.exceptions import ValidationException
 from app.services.nlp_assistant import UnsafeSQL, run_nlp_query
-
 
 router = APIRouter()
 
@@ -42,8 +42,6 @@ def nlp_query(payload: NLQueryRequest, db: Session = Depends(get_db)):
             chart_hint=ChartHint(**result.chart_hint) if result.chart_hint else None,
         )
     except UnsafeSQL as e:
-        raise HTTPException(status_code=400, detail=f"Unsafe SQL rejected: {e}") from e
+        raise ValidationException(f"Guvenilmeyen sorgu reddedildi: {e}", code="UNSAFE_SQL") from e
     except RuntimeError as e:
-        raise HTTPException(status_code=400, detail=str(e)) from e
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to run query: {e}") from e
+        raise ValidationException(str(e), code="NLP_CONFIGURATION_ERROR") from e

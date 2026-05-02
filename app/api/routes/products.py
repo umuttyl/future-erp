@@ -1,9 +1,10 @@
 from typing import List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, status
 from sqlalchemy.orm import Session
 
 from app.core.db import get_db
+from app.core.exceptions import NotFoundException, ValidationException
 from app.schemas.product import (
     ProductCreate,
     ProductOut,
@@ -12,7 +13,6 @@ from app.schemas.product import (
     StockMovementOut,
 )
 from app.services.products_service import products_service
-
 
 router = APIRouter()
 
@@ -40,7 +40,7 @@ def list_stock_movements(
 def get_product(product_id: int, db: Session = Depends(get_db)):
     obj = products_service.get(db, product_id)
     if not obj:
-        raise HTTPException(status_code=404, detail="Product not found")
+        raise NotFoundException("Ürün bulunamadı.", code="PRODUCT_NOT_FOUND")
     return obj
 
 
@@ -48,7 +48,7 @@ def get_product(product_id: int, db: Session = Depends(get_db)):
 def update_product(product_id: int, payload: ProductUpdate, db: Session = Depends(get_db)):
     obj = products_service.get(db, product_id)
     if not obj:
-        raise HTTPException(status_code=404, detail="Product not found")
+        raise NotFoundException("Ürün bulunamadı.", code="PRODUCT_NOT_FOUND")
     return products_service.update(db, obj, payload)
 
 
@@ -56,7 +56,7 @@ def update_product(product_id: int, payload: ProductUpdate, db: Session = Depend
 def delete_product(product_id: int, db: Session = Depends(get_db)):
     obj = products_service.get(db, product_id)
     if not obj:
-        raise HTTPException(status_code=404, detail="Product not found")
+        raise NotFoundException("Ürün bulunamadı.", code="PRODUCT_NOT_FOUND")
     products_service.delete(db, obj)
     return None
 
@@ -69,9 +69,9 @@ def adjust_stock(
 ):
     obj = products_service.get(db, product_id)
     if not obj:
-        raise HTTPException(status_code=404, detail="Product not found")
+        raise NotFoundException("Ürün bulunamadı.", code="PRODUCT_NOT_FOUND")
     try:
         product, _movement = products_service.adjust_stock(db, obj, payload)
         return product
     except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e)) from e
+        raise ValidationException(str(e), code="INSUFFICIENT_STOCK") from e

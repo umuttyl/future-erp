@@ -17,6 +17,7 @@ import {
   api,
   formatCurrency,
   formatNumber,
+  getApiErrorMessage,
   type FinanceSummary,
   type MonthlyPoint,
   type TopCustomer,
@@ -61,7 +62,7 @@ export function FinancePage() {
       setCustomers(cu.data)
       setTopProducts(pr.data)
     } catch (e: any) {
-      setError(e?.response?.data?.detail ?? e?.message ?? 'Yükleme başarısız')
+      setError(getApiErrorMessage(e, 'Yükleme başarısız'))
     } finally {
       setLoading(false)
     }

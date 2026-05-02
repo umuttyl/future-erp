@@ -5,6 +5,7 @@ import {
   formatCurrency,
   formatDate,
   formatNumber,
+  getApiErrorMessage,
   type Product,
   type ProductCreate,
   type ProductUpdate,
@@ -70,7 +71,7 @@ export function StockPage() {
       setProducts(pr.data)
       setMovements(mv.data)
     } catch (e: any) {
-      setError(e?.response?.data?.detail ?? e?.message ?? 'Yükleme başarısız')
+      setError(getApiErrorMessage(e, 'Yükleme başarısız'))
     } finally {
       setLoading(false)
     }
@@ -161,7 +162,7 @@ export function StockPage() {
       setShowForm(false)
       await load()
     } catch (e: any) {
-      setError(e?.response?.data?.detail ?? e?.message ?? 'Kaydedilemedi')
+      setError(getApiErrorMessage(e, 'Kaydedilemedi'))
     } finally {
       setBusy(false)
     }
@@ -175,7 +176,7 @@ export function StockPage() {
       await api.delete(`/products/${p.id}`)
       await load()
     } catch (e: any) {
-      setError(e?.response?.data?.detail ?? e?.message ?? 'Silinemedi')
+      setError(getApiErrorMessage(e, 'Silinemedi'))
     } finally {
       setBusy(false)
     }
@@ -203,7 +204,7 @@ export function StockPage() {
       setAdjust(emptyAdjust)
       await load()
     } catch (e: any) {
-      setError(e?.response?.data?.detail ?? e?.message ?? 'Stok güncellenemedi')
+      setError(getApiErrorMessage(e, 'Stok güncellenemedi'))
     } finally {
       setBusy(false)
     }

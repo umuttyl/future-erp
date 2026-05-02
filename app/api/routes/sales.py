@@ -1,16 +1,16 @@
 from datetime import date
 from typing import List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, status
 from pydantic import BaseModel
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.core.db import get_db
+from app.core.exceptions import NotFoundException, ValidationException
 from app.models.sales import SalesItem, SalesRecord
 from app.schemas.sales import SalesRecordCreate, SalesRecordOut
 from app.services.sales_service import sales_service
-
 
 router = APIRouter()
 
@@ -40,7 +40,7 @@ def list_sales_records(
 def get_sales_record(record_id: int, db: Session = Depends(get_db)):
     obj = sales_service.get_record(db, record_id)
     if not obj:
-        raise HTTPException(status_code=404, detail="Sales record not found")
+        raise NotFoundException("Satış kaydı bulunamadı.", code="SALES_RECORD_NOT_FOUND")
     return obj
 
 
@@ -49,7 +49,7 @@ def create_sales_record(payload: SalesRecordCreate, db: Session = Depends(get_db
     try:
         return sales_service.create_record(db, payload)
     except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e)) from e
+        raise ValidationException(str(e)) from e
 
 
 class DailySalesPoint(BaseModel):
