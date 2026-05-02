@@ -1,0 +1,13 @@
+fastapi
+uvicorn[standard]
+pydantic
+pydantic-settings
+SQLAlchemy>=2.0
+psycopg[binary]
+python-dotenv
+pandas
+prophet
+openai
+sqlglot
+google-generativeai
+google-genai

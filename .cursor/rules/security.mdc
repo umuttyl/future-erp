@@ -1,0 +1,60 @@
+---
+description: Auth, RBAC, multi-tenant, secrets - kirmizi cizgiler
+alwaysApply: true
+---
+
+# Guvenlik Kurallari (HER ZAMAN GECERLI)
+
+## Multi-tenant izolasyon (KRITIK)
+- Her domain sorgusunda `tenant_id` filtresi olmak ZORUNDA.
+- Tenant_id'siz `SELECT` = veri sizintisi = veri ihlali.
+- Service base sinifindan turet: `TenantScopedService`.
+- Yeni model eklerken `tenant_id: Mapped[int] = mapped_column(ForeignKey("tenants.id"), index=True)` ekle.
+
+## RBAC
+- Korumali endpoint: `Depends(require_permission("module.action"))`.
+- Izin matrisi: `app/core/permissions.py` (Faz 1).
+- "Bu kullanici tum verilere erisebilir mi?" sorusunu HER zaman sor.
+
+```python
+# BAD
+@router.delete("/customers/{id}")
+def delete(id: int, svc: CustomerService = Depends()):
+    svc.delete(id)
+
+# GOOD
+@router.delete("/customers/{id}",
+    dependencies=[Depends(require_permission("crm.customer.delete"))])
+def delete(id: int, svc: CustomerService = Depends(),
+           ctx: TenantCtx = Depends(get_tenant_ctx)):
+    svc.delete(id, ctx)
+```
+
+## Secrets
+- `.env` ASLA commit edilmez (`.gitignore` zaten korur).
+- Sadece `.env.example` git'e gider, gercek deger ICINDE YOK.
+- API key'i kod icinde hardcode YASAK.
+- Settings sinifi (`app/core/config.py`) `pydantic-settings` ile env okur.
+
+## Sifreler
+- Argon2 hash (bcrypt degil).
+- Plain text sifreyi log'a, response'a, exception mesajina YAZMA.
+- Sifre minimum: 8 karakter, 1 rakam, 1 buyuk harf (Faz 1'de zorlanir).
+
+## Token
+- Access JWT 15 dk, refresh 7 gun.
+- Refresh token DB'de hash'li sakla (rotasyon icin).
+- Logout = refresh token'i invalid et.
+
+## Loglama
+- PII (e-posta, T.C. kimlik, telefon, IP, kart no) log'a YAZMA.
+- Token, sifre, secret log'a YAZMA.
+- Hassas alan goruluyorsa `***` maskele.
+
+## SQL injection
+- ORM kullan, ham SQL'den kacin.
+- Mecbur kalirsan parametreli sorgu (`:param`), string concat YASAK.
+
+## CORS / CSRF
+- Production'da CORS allow_origins kisitli (sadece bilinen domain).
+- Cookie kullanilirsa `Secure`, `HttpOnly`, `SameSite=Lax`.

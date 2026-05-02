@@ -1,0 +1,51 @@
+---
+description: FastAPI + SQLAlchemy backend standartlari
+globs: app/**/*.py
+alwaysApply: false
+---
+
+# Backend Kurallari
+
+## Katman ayrimi (zorunlu)
+- `routes/` SADECE I/O. Hic is mantigi yok.
+- `services/` is mantigi, validasyon, transaction.
+- `models/` ORM, `schemas/` Pydantic I/O.
+
+```python
+# BAD - route icinde DB sorgusu
+@router.get("/products")
+def list_products(db: Session = Depends(get_db)):
+    return db.query(Product).all()
+
+# GOOD - service'e devret
+@router.get("/products", response_model=list[ProductOut])
+def list_products(svc: ProductsService = Depends()):
+    return svc.list_all()
+```
+
+## SQLAlchemy 2.0 typed
+- `Mapped[Type]` + `mapped_column(...)` kullan, eski Declarative API yok.
+- Iliskiler `Mapped[List["X"]]` veya `Mapped["X"]`.
+
+## Multi-tenant (Faz 1+)
+- Her domain modelinde `tenant_id: Mapped[int]` zorunlu.
+- Her sorguda tenant filtresi: `where(Model.tenant_id == ctx.tenant_id)`.
+- Service base sinifi (`TenantScopedService`) bu filtreyi otomatik yapar.
+
+## Hata yonetimi
+- Route'ta `try/except` YOK.
+- `app/core/exceptions.py`'daki sinif raise et: `raise NotFoundException("Urun bulunamadi")`.
+- Global handler tek tip JSON donduruyor: `{"error": {"code": "...", "message": "..."}}`.
+
+## Migration
+- Sadece Alembic. `Base.metadata.create_all` SADECE test fixture'inda.
+- Schema degisikligi = yeni `alembic revision --autogenerate -m "..."`.
+- Eski migration'i geri donuk duzenleme; yeni migration ekle.
+
+## Async tercihi
+- I/O bound (DB, HTTP) async.
+- CPU-bound (Prophet, pandas agir is) sync, gerekirse `run_in_executor`.
+
+## Logging
+- `structlog` kullan. `print()` YASAK.
+- Log'a PII (e-posta, T.C., sifre, token) yazma.

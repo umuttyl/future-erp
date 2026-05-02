@@ -1,0 +1,52 @@
+---
+description: Test yazim standartlari (pytest + Vitest)
+globs: tests/**/*.py, frontend/src/**/*.test.{ts,tsx}
+alwaysApply: false
+---
+
+# Test Kurallari
+
+## Backend (pytest)
+- Test dosyasi `tests/` altinda, `test_*.py` adlandirmasi.
+- Fixture'lar `tests/conftest.py` icinde paylasilan.
+- DB testi: in-memory SQLite veya ayri Postgres test DB. Production DB'ye DOKUNMA.
+- `factory_boy` ile test verisi (`ProductFactory`, `UserFactory`).
+
+```python
+# tests/conftest.py
+@pytest.fixture
+def client(db_session):
+    app.dependency_overrides[get_db] = lambda: db_session
+    return TestClient(app)
+
+# tests/test_products.py
+def test_list_products_filtered_by_tenant(client, tenant_a, tenant_b):
+    ProductFactory.create_batch(3, tenant=tenant_a)
+    ProductFactory.create_batch(2, tenant=tenant_b)
+
+    resp = client.get("/api/products", headers=auth_for(tenant_a))
+    assert len(resp.json()) == 3  # tenant_b urunlerini gormemeli
+```
+
+## Multi-tenant testi (KRITIK)
+- Her endpoint icin "baska tenant'in verisini goremez" testi YAZ.
+- RBAC: izinsiz role 403 alir testi.
+
+## Frontend (Vitest)
+- `*.test.tsx` component'in yaninda.
+- React Testing Library kullan.
+- API'yi mock'la (`msw` veya `vi.mock`).
+- Snapshot test'ten kacin; behavior test yaz.
+
+## Async test
+- `pytest-asyncio` ile `@pytest.mark.asyncio`.
+- Async client: `httpx.AsyncClient`.
+
+## Coverage
+- Hedef: kritik modullerde (auth, RBAC, finance) %80+.
+- 100 zorla degil; degerli testler yaz.
+
+## Asla yapma
+- Production DB'ye baglanan test.
+- Sleep'li flaky test (event-based bekle).
+- Test'te hardcoded date (`datetime.now()` mock'la veya `freezegun`).

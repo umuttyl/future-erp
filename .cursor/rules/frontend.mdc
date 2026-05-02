@@ -1,0 +1,50 @@
+---
+description: React 19 + TypeScript + Tailwind frontend standartlari
+globs: frontend/**/*.{ts,tsx}
+alwaysApply: false
+---
+
+# Frontend Kurallari
+
+## API cagrisi
+- TUM API cagrilari `frontend/src/lib/api.ts` uzerinden.
+- Component icinde `fetch` veya `axios` YASAK.
+
+```tsx
+// BAD
+const data = await fetch('/api/products').then(r => r.json())
+
+// GOOD
+import { api } from '@/lib/api'
+const data = await api.products.list()
+```
+
+## Component pattern
+- Function component + named export.
+- `default export` sadece sayfa dosyalarinda (`pages/`).
+- Bir dosyada bir component (paylasilan kucuk parcalar haric).
+
+## TypeScript
+- `tsconfig` strict acik kalmali, kapama.
+- `any` YASAK. Bilmiyorsan `unknown` + type guard.
+- Props icin ayri `interface` veya `type`.
+
+## State
+- Yerel: `useState`, `useReducer`.
+- Paylasimli: Context. Redux/Zustand yok (gerekince eklenir).
+- Server cache: simdilik manuel; ileride React Query gelebilir.
+
+## Tailwind
+- Class isimleri Prettier plugin ile sirali.
+- Arbitrary value (`w-[373px]`) sadece zorunluysa, design system tercih.
+- Dark mode default (`bg-slate-950` paleti).
+
+## Routing
+- `react-router` 7.
+- Route tanimlari `App.tsx`'te.
+- Korumali route: `<ProtectedRoute role="manager">` (Faz 1).
+
+## i18n
+- Kullaniciya gosterilen mesaj **Turkce**.
+- Kod / identifier / yorum **Ingilizce**.
+- `tr-TR` locale: tarih `Intl.DateTimeFormat('tr-TR')`, para `Intl.NumberFormat('tr-TR', {style:'currency', currency:'TRY'})`.

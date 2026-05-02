@@ -1,0 +1,84 @@
+# ============================================================
+# Future ERP — Root .gitignore
+# ============================================================
+
+# ---- Python ----
+.venv/
+venv/
+env/
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+.nox/
+*.egg-info/
+*.egg
+dist/
+build/
+
+# ---- Node / Frontend ----
+node_modules/
+frontend/dist/
+frontend/dist-ssr/
+*.local
+
+# ---- Environment & Secrets ----
+.env
+.env.*
+!.env.example
+
+# ---- Databases & local data ----
+*.db
+*.sqlite
+*.sqlite3
+*.db-journal
+
+# ---- Archive / backups ----
+archive/
+*.bak
+*.backup
+
+# ---- IDE & Editor ----
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json
+!.vscode/launch.json
+.idea/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# ---- OS ----
+.DS_Store
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# ---- Logs ----
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# ---- Cursor / private notes ----
+# Cursor'a özel kişisel notlarımız git'e gitmesin.
+# AGENTS.md ve .cursor/rules/ paylaşılır (git'e gider).
+.cursor/PROGRESS.md
+.cursor/notes/
+.cursor/scratch/
+
+# ---- Misc ----
+*.tmp
+*.temp
+.cache/
