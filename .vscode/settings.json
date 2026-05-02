@@ -1,0 +1,170 @@
+{
+  "//": "Future ERP - workspace settings. Tum gelistiriciler icin tutarli format/lint davranisi.",
+
+  // ========== Editor ==========
+  "editor.rulers": [100],
+  "editor.tabSize": 2,
+  "editor.insertSpaces": true,
+  "editor.formatOnSave": true,
+  "editor.defaultFormatter": "esbenp.prettier-vscode",
+  "editor.codeActionsOnSave": {
+    "source.organizeImports": "explicit",
+    "source.fixAll.eslint": "explicit"
+  },
+  "files.eol": "\n",
+  "files.insertFinalNewline": true,
+  "files.trimTrailingWhitespace": true,
+  "files.trimFinalNewlines": true,
+
+  // ========== Python (backend) ==========
+  "python.defaultInterpreterPath": "${workspaceFolder}/.venv/Scripts/python.exe",
+  "python.terminal.activateEnvironment": true,
+  "python.analysis.typeCheckingMode": "basic",
+  "python.analysis.autoImportCompletions": true,
+  "python.analysis.diagnosticMode": "workspace",
+
+  "[python]": {
+    "editor.defaultFormatter": "charliermarsh.ruff",
+    "editor.tabSize": 4,
+    "editor.formatOnSave": true,
+    "editor.codeActionsOnSave": {
+      "source.fixAll.ruff": "explicit",
+      "source.organizeImports.ruff": "explicit"
+    }
+  },
+
+  // ========== Ruff ==========
+  "ruff.organizeImports": true,
+  "ruff.fixAll": true,
+
+  // ========== TypeScript / JavaScript ==========
+  "typescript.tsdk": "frontend/node_modules/typescript/lib",
+  "typescript.enablePromptUseWorkspaceTsdk": true,
+  "typescript.preferences.importModuleSpecifier": "relative",
+  "javascript.preferences.importModuleSpecifier": "relative",
+
+  "[typescript]": {
+    "editor.defaultFormatter": "esbenp.prettier-vscode"
+  },
+  "[typescriptreact]": {
+    "editor.defaultFormatter": "esbenp.prettier-vscode"
+  },
+  "[javascript]": {
+    "editor.defaultFormatter": "esbenp.prettier-vscode"
+  },
+  "[javascriptreact]": {
+    "editor.defaultFormatter": "esbenp.prettier-vscode"
+  },
+  "[json]": {
+    "editor.defaultFormatter": "esbenp.prettier-vscode"
+  },
+  "[jsonc]": {
+    "editor.defaultFormatter": "esbenp.prettier-vscode"
+  },
+  "[markdown]": {
+    "editor.defaultFormatter": "yzhang.markdown-all-in-one",
+    "editor.formatOnSave": false
+  },
+  "[mdc]": {
+    "editor.formatOnSave": false
+  },
+
+  // ========== ESLint ==========
+  "eslint.workingDirectories": [{ "pattern": "frontend" }],
+  "eslint.validate": ["javascript", "javascriptreact", "typescript", "typescriptreact"],
+
+  // ========== Tailwind CSS ==========
+  "tailwindCSS.experimental.classRegex": [
+    ["clsx\\(([^)]*)\\)", "(?:'|\"|`)([^']*)(?:'|\"|`)"],
+    ["cn\\(([^)]*)\\)", "(?:'|\"|`)([^']*)(?:'|\"|`)"]
+  ],
+  "tailwindCSS.includeLanguages": {
+    "typescript": "javascript",
+    "typescriptreact": "javascript"
+  },
+
+  // ========== Spell checker ==========
+  "cSpell.language": "en,tr",
+  "cSpell.words": [
+    "fastapi",
+    "sqlalchemy",
+    "alembic",
+    "pydantic",
+    "psycopg",
+    "uvicorn",
+    "argon",
+    "structlog",
+    "mypy",
+    "ruff",
+    "vitest",
+    "playwright",
+    "tailwindcss",
+    "recharts",
+    "axios",
+    "Future ERP",
+    "tenant",
+    "RBAC",
+    "JWT",
+    "KOBI",
+    "perakende",
+    "muhasebe",
+    "fatura",
+    "umuttyl"
+  ],
+  "cSpell.enableFiletypes": ["python", "typescript", "typescriptreact", "markdown"],
+
+  // ========== Files / Search ==========
+  "files.exclude": {
+    "**/__pycache__": true,
+    "**/*.pyc": true,
+    "**/.pytest_cache": true,
+    "**/.mypy_cache": true,
+    "**/.ruff_cache": true
+  },
+  "search.exclude": {
+    "**/.venv": true,
+    "**/node_modules": true,
+    "**/dist": true,
+    "**/build": true,
+    "**/archive": true,
+    "**/*.lock": true,
+    "frontend/package-lock.json": true
+  },
+  "files.watcherExclude": {
+    "**/.venv/**": true,
+    "**/node_modules/**": true,
+    "**/__pycache__/**": true
+  },
+
+  // ========== TODO Tree ==========
+  "todo-tree.general.tags": ["TODO", "FIXME", "HACK", "NOTE", "OPTIMIZE", "BUG"],
+  "todo-tree.highlights.defaultHighlight": {
+    "icon": "alert",
+    "type": "tag"
+  },
+
+  // ========== Conventional Commits ==========
+  "conventionalCommits.scopes": [
+    "auth",
+    "rbac",
+    "tenant",
+    "products",
+    "sales",
+    "stock",
+    "finance",
+    "ai",
+    "nlp",
+    "forecast",
+    "frontend",
+    "backend",
+    "db",
+    "alembic",
+    "ci",
+    "docs"
+  ],
+
+  // ========== Git ==========
+  "git.autofetch": true,
+  "git.confirmSync": false,
+  "git.enableSmartCommit": true
+}

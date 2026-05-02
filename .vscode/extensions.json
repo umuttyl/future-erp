@@ -1,0 +1,41 @@
+{
+  "// description": "Future ERP - VSCode/Cursor onerilen eklentiler. Cursor a\u00e7t\u0131\u011f\u0131nda 'Bunlar\u0131 y\u00fckle' bildirimini g\u00f6r\u00fcrs\u00fcn\u00fcz.",
+  "recommendations": [
+    "ms-python.python",
+    "ms-python.vscode-pylance",
+    "charliermarsh.ruff",
+    "ms-python.mypy-type-checker",
+    "njpwerner.autodocstring",
+    "tamasfe.even-better-toml",
+
+    "dbaeumer.vscode-eslint",
+    "esbenp.prettier-vscode",
+    "bradlc.vscode-tailwindcss",
+    "yoavbls.pretty-ts-errors",
+    "dsznajder.es7-react-js-snippets",
+    "vitest.explorer",
+
+    "qwtel.sqlite-viewer",
+    "mtxr.sqltools",
+    "mtxr.sqltools-driver-pg",
+
+    "eamodio.gitlens",
+    "mhutchie.git-graph",
+    "github.vscode-pull-request-github",
+    "vivaxy.vscode-conventional-commits",
+    "github.vscode-github-actions",
+
+    "usernamehw.errorlens",
+    "streetsidesoftware.code-spell-checker",
+    "streetsidesoftware.code-spell-checker-turkish",
+    "gruntfuggly.todo-tree",
+    "christian-kohler.path-intellisense",
+
+    "ms-azuretools.vscode-docker",
+    "rangav.vscode-thunder-client",
+
+    "yzhang.markdown-all-in-one",
+    "bierner.markdown-mermaid"
+  ],
+  "unwantedRecommendations": []
+}
