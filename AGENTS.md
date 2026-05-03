@@ -29,7 +29,7 @@
 |---|---|
 | Backend | FastAPI, SQLAlchemy 2.0 (typed `Mapped`), Pydantic v2, Alembic |
 | Frontend | React 19, Vite, TypeScript (strict), Tailwind CSS v3, Recharts, react-router 7 |
-| Veritabanı | SQLite (Faz 0 — dev), PostgreSQL (Faz 1+ — hedef) |
+| Veritabanı | SQLite (dev), PostgreSQL (Faz 2+ — hedef; Faz 1 çekirdeği SQLite ile tamamlandı) |
 | AI / ML | OpenAI / Gemini SDK, Prophet (forecast), pandas |
 | Auth | JWT access + refresh, Argon2 password hash (Faz 1) |
 | Bildirim/Queue | (Yok — Faz 2/3'te Redis + Celery) |
@@ -89,16 +89,16 @@ Future_Erp/
 - **Asla** ham SQL veya elle yazılmış sorguda tenant_id'siz `SELECT` olmayacak.
 
 ### 4.2. RBAC (Faz 1)
-Roller:
+**Kodda uygulanan roller (Faz 1 çekirdek):** `admin`, `manager`, `employee` — izin matrisi `app/core/permissions.py`.
+
+**Yol haritası (genişletme — Faz 2+):** aşağıdaki ayrımlar ileride modül büyüdükçe eklenebilir:
 - `super_admin` — sistem sahibi (sadece geliştirici)
 - `tenant_admin` — şirket sahibi/patron
-- `manager` — yönetici (raporlar, onaylar)
 - `sales` — satış personeli (POS, müşteri ekleme)
 - `warehouse` — depo (stok, mal kabul, sayım)
 - `accountant` — muhasebe (fatura, cari, KDV)
-- `employee` — kendi profili
 
-İzinler `Depends(require_permission("sales.write"))` deseninde.
+İzinler `Depends(require_permission("module.action"))` deseninde (`app/core/deps.py`).
 
 ### 4.3. Auth
 - JWT: kısa ömürlü access (15 dk) + uzun ömürlü refresh (7 gün).
@@ -184,7 +184,7 @@ Roller:
 | Faz | İçerik | Durum |
 |---|---|---|
 | **0** | Git + eklentiler + Alembic + seed + logging + pytest + Vitest iskeleti | Tamamlandı |
-| **1** | Auth + RBAC + multi-tenant + Postgres'e geçiş + admin/manager/employee panelleri | Bekliyor |
+| **1** | Auth + RBAC + multi-tenant + admin/manager/employee UI çekirdeği | **Çekirdek tamam** (SQLite; JWT access/refresh, `/api/auth/login` + `/api/auth/signup`, `User` HR alanları `full_name`/`department`, frontend Login/Signup/Dashboard/Admin). Postgres geçişi **Faz 2** |
 | **2** | CRM + Satınalma + Muhasebe (light) + Çoklu depo + HR + Doc + Raporlama + Bildirim | Bekliyor |
 | **3** | TR lokalizasyon + e-Fatura + Agentic NLP + Excel auto-import + Anomali + WhatsApp bot + Perakende şablonu | Bekliyor |
 | **4** | SaaS multi-tenant + abonelik (Stripe/İyzico) + PWA + marketing | Bekliyor |

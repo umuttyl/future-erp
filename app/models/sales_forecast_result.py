@@ -13,6 +13,7 @@ class SalesForecastResult(Base):
     __tablename__ = "sales_forecast_results"
 
     id: Mapped[int] = mapped_column(primary_key=True)
+    tenant_id: Mapped[int] = mapped_column(ForeignKey("tenants.id", ondelete="CASCADE"), index=True)
     model_name: Mapped[str] = mapped_column(String(128), index=True)
     scope: Mapped[str] = mapped_column(String(64), default="global", index=True)  # global|product|customer...
 

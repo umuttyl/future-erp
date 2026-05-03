@@ -12,19 +12,23 @@ from app.services.finance_service import finance_service
 from app.services.nlp_assistant import _extract_json, _generate_content
 
 
-def _collect_context(db: Session) -> Dict[str, Any]:
+def _collect_context(db: Session, tenant_id: int) -> Dict[str, Any]:
     today = date.today()
     last_30_start = today - timedelta(days=30)
     prev_30_start = today - timedelta(days=60)
     prev_30_end = today - timedelta(days=31)
 
-    summary = finance_service.summary(db, start_date=last_30_start, end_date=today)
-    prev = finance_service.summary(db, start_date=prev_30_start, end_date=prev_30_end)
-    monthly = finance_service.monthly_revenue(db)
-    top_customers = finance_service.top_customers(db, start_date=last_30_start, end_date=today, limit=5)
-    top_products = finance_service.top_products(db, start_date=last_30_start, end_date=today, limit=5)
+    summary = finance_service.summary(db, tenant_id, start_date=last_30_start, end_date=today)
+    prev = finance_service.summary(db, tenant_id, start_date=prev_30_start, end_date=prev_30_end)
+    monthly = finance_service.monthly_revenue(db, tenant_id)
+    top_customers = finance_service.top_customers(
+        db, tenant_id, start_date=last_30_start, end_date=today, limit=5
+    )
+    top_products = finance_service.top_products(
+        db, tenant_id, start_date=last_30_start, end_date=today, limit=5
+    )
 
-    all_products = list(db.scalars(select(Product)).all())
+    all_products = list(db.scalars(select(Product).where(Product.tenant_id == tenant_id)).all())
     low_stock = [
         {
             "id": p.id,
@@ -73,8 +77,8 @@ def _insights_prompt(ctx: Dict[str, Any]) -> str:
     )
 
 
-def build_insights(db: Session) -> Dict[str, Any]:
-    ctx = _collect_context(db)
+def build_insights(db: Session, tenant_id: int) -> Dict[str, Any]:
+    ctx = _collect_context(db, tenant_id)
 
     try:
         raw = _generate_content(_insights_prompt(ctx))

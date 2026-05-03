@@ -14,11 +14,13 @@ from typing import Any
 import structlog
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app.api.router import api_router
 from app.core.config import settings
+from app.core.dev_bootstrap import ensure_dev_demo_users_if_empty
 from app.core.exceptions import AppException, InternalError
 from app.core.logging import configure_logging
 
@@ -33,6 +35,7 @@ async def lifespan(app: FastAPI):
         project=settings.PROJECT_NAME,
         env=settings.ENV,
     )
+    ensure_dev_demo_users_if_empty()
     yield
     logger.info("app_shutdown")
 
@@ -116,6 +119,13 @@ def register_exception_handlers(app: FastAPI) -> None:
 def create_app() -> FastAPI:
     app = FastAPI(title=settings.PROJECT_NAME, lifespan=lifespan)
     register_exception_handlers(app)
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=settings.cors_origins_list(),
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
     app.include_router(api_router, prefix="/api")
     return app
 

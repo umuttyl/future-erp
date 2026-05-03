@@ -56,7 +56,9 @@ npm install
 
 ## Ortam değişkenleri
 
-Kökte `.env` oluşturun (örnek için `.env.example`'a bakın):
+**Varsayılan (`.env` yoksa):** uygulama ve Alembic aynı dosyayı kullanır — `sqlite:///./future_erp_ai.db` (proje kökünde oluşur). PostgreSQL yapılandırılmadığı sürece ek bir DB sunucusu gerekmez.
+
+Kökte `.env` oluşturmak için `.env.example` dosyasını kopyalayın:
 
 ```env
 PROJECT_NAME=Future ERP

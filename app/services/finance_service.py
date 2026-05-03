@@ -23,6 +23,7 @@ class FinanceService:
     def summary(
         self,
         db: Session,
+        tenant_id: int,
         *,
         start_date: Optional[date] = None,
         end_date: Optional[date] = None,
@@ -37,6 +38,8 @@ class FinanceService:
                 func.count(func.distinct(SalesRecord.customer_name)),
             )
             .join(SalesItem, SalesItem.sales_record_id == SalesRecord.id)
+            .where(SalesRecord.tenant_id == tenant_id)
+            .where(SalesItem.tenant_id == tenant_id)
             .where(SalesRecord.sale_date >= start)
             .where(SalesRecord.sale_date <= end)
         )
@@ -51,6 +54,9 @@ class FinanceService:
             )
             .join(Product, Product.id == SalesItem.product_id)
             .join(SalesRecord, SalesRecord.id == SalesItem.sales_record_id)
+            .where(SalesRecord.tenant_id == tenant_id)
+            .where(SalesItem.tenant_id == tenant_id)
+            .where(Product.tenant_id == tenant_id)
             .where(SalesRecord.sale_date >= start)
             .where(SalesRecord.sale_date <= end)
         )
@@ -63,7 +69,7 @@ class FinanceService:
 
         inventory_value_stmt = select(
             func.coalesce(func.sum(Product.stock_quantity * Product.unit_price), 0)
-        )
+        ).where(Product.tenant_id == tenant_id)
         inventory_value = float(db.execute(inventory_value_stmt).scalar_one() or 0)
 
         return {
@@ -83,13 +89,13 @@ class FinanceService:
     def monthly_revenue(
         self,
         db: Session,
+        tenant_id: int,
         *,
         start_date: Optional[date] = None,
         end_date: Optional[date] = None,
     ) -> List[Dict[str, Any]]:
         start, end = _default_range(start_date, end_date, days=365)
 
-        # SQLite + Postgres uyumlu: tarihi YYYY-MM formatına çevir
         month_expr = func.strftime("%Y-%m", SalesRecord.sale_date)
         stmt = (
             select(
@@ -99,6 +105,8 @@ class FinanceService:
                 func.count(func.distinct(SalesRecord.id)).label("orders"),
             )
             .join(SalesItem, SalesItem.sales_record_id == SalesRecord.id)
+            .where(SalesRecord.tenant_id == tenant_id)
+            .where(SalesItem.tenant_id == tenant_id)
             .where(SalesRecord.sale_date >= start)
             .where(SalesRecord.sale_date <= end)
             .group_by(month_expr)
@@ -118,6 +126,7 @@ class FinanceService:
     def top_customers(
         self,
         db: Session,
+        tenant_id: int,
         *,
         start_date: Optional[date] = None,
         end_date: Optional[date] = None,
@@ -132,6 +141,8 @@ class FinanceService:
                 func.count(func.distinct(SalesRecord.id)).label("orders"),
             )
             .join(SalesItem, SalesItem.sales_record_id == SalesRecord.id)
+            .where(SalesRecord.tenant_id == tenant_id)
+            .where(SalesItem.tenant_id == tenant_id)
             .where(SalesRecord.sale_date >= start)
             .where(SalesRecord.sale_date <= end)
             .where(SalesRecord.customer_name.is_not(None))
@@ -152,6 +163,7 @@ class FinanceService:
     def top_products(
         self,
         db: Session,
+        tenant_id: int,
         *,
         start_date: Optional[date] = None,
         end_date: Optional[date] = None,
@@ -169,6 +181,9 @@ class FinanceService:
             )
             .join(SalesItem, SalesItem.product_id == Product.id)
             .join(SalesRecord, SalesRecord.id == SalesItem.sales_record_id)
+            .where(SalesRecord.tenant_id == tenant_id)
+            .where(SalesItem.tenant_id == tenant_id)
+            .where(Product.tenant_id == tenant_id)
             .where(SalesRecord.sale_date >= start)
             .where(SalesRecord.sale_date <= end)
             .group_by(Product.id, Product.sku, Product.name)

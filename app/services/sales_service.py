@@ -17,6 +17,7 @@ class SalesService:
     def list_records(
         self,
         db: Session,
+        tenant_id: int,
         *,
         start_date: Optional[date] = None,
         end_date: Optional[date] = None,
@@ -28,6 +29,7 @@ class SalesService:
         stmt = (
             select(SalesRecord)
             .options(selectinload(SalesRecord.items))
+            .where(SalesRecord.tenant_id == tenant_id)
             .order_by(SalesRecord.sale_date.desc(), SalesRecord.id.desc())
             .limit(limit)
         )
@@ -47,16 +49,17 @@ class SalesService:
             stmt = stmt.where(SalesRecord.total_amount >= Decimal(str(min_amount)))
         return list(db.scalars(stmt).all())
 
-    def get_record(self, db: Session, record_id: int) -> Optional[SalesRecord]:
+    def get_record(self, db: Session, tenant_id: int, record_id: int) -> Optional[SalesRecord]:
         stmt = (
             select(SalesRecord)
             .options(selectinload(SalesRecord.items))
-            .where(SalesRecord.id == record_id)
+            .where(SalesRecord.id == record_id, SalesRecord.tenant_id == tenant_id)
         )
         return db.scalar(stmt)
 
-    def create_record(self, db: Session, data: SalesRecordCreate) -> SalesRecord:
+    def create_record(self, db: Session, tenant_id: int, data: SalesRecordCreate) -> SalesRecord:
         record = SalesRecord(
+            tenant_id=tenant_id,
             record_no=data.record_no,
             sale_date=data.sale_date,
             customer_name=data.customer_name,
@@ -68,7 +71,8 @@ class SalesService:
         touched_products: list[Product] = []
 
         for i in data.items:
-            product = db.get(Product, i.product_id)
+            p_stmt = select(Product).where(Product.id == i.product_id, Product.tenant_id == tenant_id)
+            product = db.scalar(p_stmt)
             if not product:
                 raise ValueError(f"Product not found: {i.product_id}")
             if (product.stock_quantity or 0) < i.quantity:
@@ -80,6 +84,7 @@ class SalesService:
             total += line_total
             items.append(
                 SalesItem(
+                    tenant_id=tenant_id,
                     product_id=i.product_id,
                     quantity=i.quantity,
                     unit_price=i.unit_price,
@@ -102,6 +107,7 @@ class SalesService:
         for it, p in zip(record.items, touched_products):
             db.add(
                 StockMovement(
+                    tenant_id=tenant_id,
                     product_id=p.id,
                     movement_type="out",
                     change=-int(it.quantity),
@@ -112,7 +118,7 @@ class SalesService:
             )
         db.commit()
 
-        return self.get_record(db, record.id) or record
+        return self.get_record(db, tenant_id, record.id) or record
 
 
 sales_service = SalesService()

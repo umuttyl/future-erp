@@ -18,9 +18,10 @@ def test_get_product_not_found(client):
     assert body["error"]["code"] == "PRODUCT_NOT_FOUND"
 
 
-def test_list_products_returns_rows(client, db_session: Session):
+def test_list_products_returns_rows(client, db_session: Session, test_tenant):
     db_session.add(
         Product(
+            tenant_id=test_tenant.id,
             sku="SKU-T1",
             name="Test Ürün",
             category=None,

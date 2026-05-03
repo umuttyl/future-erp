@@ -6,9 +6,10 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.db import get_db
+from app.core.deps import TenantContext, get_tenant_ctx, require_permission
+from app.core.permissions import AI_INSIGHTS_READ
 from app.models.product import Product
 from app.services.ai_insights import build_insights
-
 
 router = APIRouter()
 
@@ -24,13 +25,21 @@ class StockAlert(BaseModel):
 
 
 @router.get("/insights")
-def get_insights(db: Session = Depends(get_db)) -> Dict[str, Any]:
-    return build_insights(db)
+def get_insights(
+    ctx: TenantContext = Depends(get_tenant_ctx),
+    _: object = Depends(require_permission(AI_INSIGHTS_READ)),
+    db: Session = Depends(get_db),
+) -> Dict[str, Any]:
+    return build_insights(db, ctx.tenant_id)
 
 
 @router.get("/stock-alerts", response_model=List[StockAlert])
-def stock_alerts(db: Session = Depends(get_db)) -> List[StockAlert]:
-    products = list(db.scalars(select(Product)).all())
+def stock_alerts(
+    ctx: TenantContext = Depends(get_tenant_ctx),
+    _: object = Depends(require_permission(AI_INSIGHTS_READ)),
+    db: Session = Depends(get_db),
+) -> List[StockAlert]:
+    products = list(db.scalars(select(Product).where(Product.tenant_id == ctx.tenant_id)).all())
     alerts: List[StockAlert] = []
     for p in products:
         rl = int(p.reorder_level or 0)

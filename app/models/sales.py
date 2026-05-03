@@ -4,7 +4,7 @@ from datetime import date, datetime
 from decimal import Decimal
 from typing import List, Optional
 
-from sqlalchemy import Date, DateTime, ForeignKey, Integer, Numeric, String, func
+from sqlalchemy import Date, DateTime, ForeignKey, Integer, Numeric, String, UniqueConstraint, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import Base
@@ -12,9 +12,11 @@ from app.models.base import Base
 
 class SalesRecord(Base):
     __tablename__ = "sales_records"
+    __table_args__ = (UniqueConstraint("tenant_id", "record_no", name="uq_sales_records_tenant_record_no"),)
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    record_no: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    tenant_id: Mapped[int] = mapped_column(ForeignKey("tenants.id", ondelete="CASCADE"), index=True)
+    record_no: Mapped[str] = mapped_column(String(64), index=True)
     sale_date: Mapped[date] = mapped_column(Date, index=True)
     customer_name: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     total_amount: Mapped[Decimal] = mapped_column(Numeric(14, 2), default=0)
@@ -37,6 +39,7 @@ class SalesItem(Base):
     __tablename__ = "sales_items"
 
     id: Mapped[int] = mapped_column(primary_key=True)
+    tenant_id: Mapped[int] = mapped_column(ForeignKey("tenants.id", ondelete="CASCADE"), index=True)
     sales_record_id: Mapped[int] = mapped_column(ForeignKey("sales_records.id", ondelete="CASCADE"), index=True)
     product_id: Mapped[int] = mapped_column(ForeignKey("products.id"), index=True)
 

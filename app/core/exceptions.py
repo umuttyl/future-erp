@@ -47,6 +47,18 @@ class ValidationException(AppException):
         super().__init__(message, code=code, status_code=400)
 
 
+class UnauthorizedException(AppException):
+    """Kimlik doğrulanmadı — 401."""
+
+    def __init__(
+        self,
+        message: str = "Oturum gerekli.",
+        *,
+        code: str = "UNAUTHORIZED",
+    ) -> None:
+        super().__init__(message, code=code, status_code=401)
+
+
 class PermissionException(AppException):
     """Yetkisiz erisim — 403."""
 

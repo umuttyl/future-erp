@@ -38,6 +38,7 @@ from app.models.base import Base  # noqa: E402
 from app.models.product import Product  # noqa: E402
 from app.models.sales import SalesItem, SalesRecord  # noqa: E402
 from app.models.stock_movement import StockMovement  # noqa: E402
+from app.models.tenant import Tenant  # noqa: E402
 
 
 # ===========================================================================
@@ -46,6 +47,13 @@ from app.models.stock_movement import StockMovement  # noqa: E402
 
 def _d(value: str | float | int) -> Decimal:
     return Decimal(str(value)).quantize(Decimal("0.01"))
+
+
+def _default_tenant_id(db: Session) -> int:
+    tid = db.scalar(select(Tenant.id).where(Tenant.slug == "default"))
+    if tid is None:
+        raise RuntimeError("Varsayılan kiracı yok. Önce: alembic upgrade head")
+    return int(tid)
 
 
 @dataclass(frozen=True)
@@ -184,10 +192,13 @@ def _reset_database() -> None:
 # 4) URUN SEED (idempotent)
 # ===========================================================================
 
-def _seed_products(db: Session, catalog: Iterable[ProductSpec]) -> dict[str, Product]:
+def _seed_products(db: Session, catalog: Iterable[ProductSpec], *, tenant_id: int) -> dict[str, Product]:
     """SKU bazli idempotent urun seed. Mevcutlari gunceller, yeni olanlari ekler."""
     catalog = list(catalog)
-    existing = {p.sku: p for p in db.scalars(select(Product)).all()}
+    existing = {
+        p.sku: p
+        for p in db.scalars(select(Product).where(Product.tenant_id == tenant_id)).all()
+    }
 
     out: dict[str, Product] = {}
     created = 0
@@ -205,6 +216,7 @@ def _seed_products(db: Session, catalog: Iterable[ProductSpec]) -> dict[str, Pro
             updated += 1
         else:
             p = Product(
+                tenant_id=tenant_id,
                 sku=spec.sku,
                 name=spec.name,
                 category=spec.category,
@@ -227,12 +239,14 @@ def _seed_products(db: Session, catalog: Iterable[ProductSpec]) -> dict[str, Pro
         already_in = db.scalar(
             select(StockMovement.id)
             .where(StockMovement.product_id == p.id)
+            .where(StockMovement.tenant_id == tenant_id)
             .where(StockMovement.movement_type == "in")
             .limit(1)
         )
         if not already_in and p.stock_quantity > 0:
             db.add(
                 StockMovement(
+                    tenant_id=tenant_id,
                     product_id=p.id,
                     movement_type="in",
                     change=p.stock_quantity,
@@ -311,6 +325,7 @@ def _seed_sales(
     db: Session,
     products_by_sku: dict[str, Product],
     *,
+    tenant_id: int,
     days: int = 365,
 ) -> int:
     """Gunluk gercekci satis kayitlari uret."""
@@ -318,7 +333,9 @@ def _seed_sales(
     products = list(products_by_sku.values())
 
     start = date.today() - timedelta(days=days)
-    existing_nos = set(db.scalars(select(SalesRecord.record_no)).all())
+    existing_nos = set(
+        db.scalars(select(SalesRecord.record_no).where(SalesRecord.tenant_id == tenant_id)).all()
+    )
 
     created = 0
     for i in range(days + 1):
@@ -333,6 +350,7 @@ def _seed_sales(
                 db.flush()
                 db.add(
                     StockMovement(
+                        tenant_id=tenant_id,
                         product_id=p.id,
                         movement_type="in",
                         change=refill,
@@ -352,6 +370,7 @@ def _seed_sales(
 
             customer = random.choice(ALL_CUSTOMERS)
             record = SalesRecord(
+                tenant_id=tenant_id,
                 record_no=record_no,
                 sale_date=day,
                 customer_name=customer,
@@ -379,6 +398,7 @@ def _seed_sales(
 
                 db.add(
                     SalesItem(
+                        tenant_id=tenant_id,
                         sales_record_id=record.id,
                         product_id=p.id,
                         quantity=qty,
@@ -391,6 +411,7 @@ def _seed_sales(
                 db.flush()
                 db.add(
                     StockMovement(
+                        tenant_id=tenant_id,
                         product_id=p.id,
                         movement_type="out",
                         change=-qty,
@@ -417,6 +438,7 @@ def _seed_returns_and_adjustments(
     db: Session,
     products: list[Product],
     *,
+    tenant_id: int,
     days: int = 365,
 ) -> None:
     """%1 oraninda iade + sayim duzeltmesi."""
@@ -432,6 +454,7 @@ def _seed_returns_and_adjustments(
         db.flush()
         db.add(
             StockMovement(
+                tenant_id=tenant_id,
                 product_id=p.id,
                 movement_type="in",
                 change=qty,
@@ -454,6 +477,7 @@ def _seed_returns_and_adjustments(
         db.flush()
         db.add(
             StockMovement(
+                tenant_id=tenant_id,
                 product_id=p.id,
                 movement_type="adjust",
                 change=actual_change,
@@ -473,15 +497,17 @@ def _seed_returns_and_adjustments(
 
 def seed_minimal(db: Session) -> None:
     """Sadece urun katalogu, satis yok. Test ve bos baslangic icin."""
-    _seed_products(db, PRODUCT_CATALOG)
+    tid = _default_tenant_id(db)
+    _seed_products(db, PRODUCT_CATALOG, tenant_id=tid)
     print("[seed] Minimal seed complete (no sales).")
 
 
 def seed_demo(db: Session, *, days: int = 365) -> None:
     """Tam demo: katalog + 365 gunluk gercekci satis + iade + sayim."""
-    products_by_sku = _seed_products(db, PRODUCT_CATALOG)
-    _seed_sales(db, products_by_sku, days=days)
-    _seed_returns_and_adjustments(db, list(products_by_sku.values()), days=days)
+    tid = _default_tenant_id(db)
+    products_by_sku = _seed_products(db, PRODUCT_CATALOG, tenant_id=tid)
+    _seed_sales(db, products_by_sku, tenant_id=tid, days=days)
+    _seed_returns_and_adjustments(db, list(products_by_sku.values()), tenant_id=tid, days=days)
     print("[seed] Demo seed complete.")
 
 

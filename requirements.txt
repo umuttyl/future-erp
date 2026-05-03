@@ -1,7 +1,10 @@
 fastapi
 uvicorn[standard]
+pyjwt>=2.8.0
+argon2-cffi>=23.1.0
 pydantic
 pydantic-settings
+email-validator>=2.0.0
 SQLAlchemy>=2.0
 alembic>=1.13
 psycopg[binary]

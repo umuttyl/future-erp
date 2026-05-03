@@ -1,5 +1,6 @@
 import { useMemo, useRef, useState } from 'react'
 
+import { useAuth } from '../context/AuthContext'
 import {
   api,
   formatCurrency,
@@ -26,6 +27,8 @@ const INTRO_MESSAGE: ChatMessage = {
 }
 
 export function NlpAssistantBubble() {
+  const { user, hasPermission } = useAuth()
+
   const [open, setOpen] = useState(false)
   const [input, setInput] = useState('')
   const [messages, setMessages] = useState<ChatMessage[]>([INTRO_MESSAGE])
@@ -33,6 +36,10 @@ export function NlpAssistantBubble() {
   const bottomRef = useRef<HTMLDivElement | null>(null)
 
   const canSend = useMemo(() => input.trim().length >= 3 && !busy, [input, busy])
+
+  if (!user || !hasPermission('nlp.query.execute')) {
+    return null
+  }
 
   async function send() {
     const text = input.trim()

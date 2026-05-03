@@ -54,6 +54,7 @@ Schema (PostgreSQL compatible, but must also work on SQLite when possible):
 
 Table: products
   - id (int, pk)
+  - tenant_id (int, fk) — ZORUNLU filtre
   - sku (varchar)
   - name (varchar)
   - category (varchar, nullable)
@@ -64,6 +65,7 @@ Table: products
 
 Table: sales_records
   - id (int, pk)
+  - tenant_id (int, fk) — ZORUNLU filtre
   - record_no (varchar)
   - sale_date (date)
   - customer_name (varchar, nullable)
@@ -71,6 +73,7 @@ Table: sales_records
 
 Table: sales_items
   - id (int, pk)
+  - tenant_id (int, fk) — ZORUNLU filtre
   - sales_record_id (int, fk -> sales_records.id)
   - product_id (int, fk -> products.id)
   - quantity (int)
@@ -79,6 +82,7 @@ Table: sales_items
 
 Table: sales_forecast_results
   - id (int, pk)
+  - tenant_id (int, fk) — ZORUNLU filtre
   - model_name (varchar)
   - scope (varchar)
   - product_id (int, nullable)
@@ -89,6 +93,7 @@ Table: sales_forecast_results
 
 Table: stock_movements
   - id (int, pk)
+  - tenant_id (int, fk) — ZORUNLU filtre
   - product_id (int, fk -> products.id)
   - movement_type (varchar: 'in' | 'out' | 'adjust')
   - change (int)
@@ -102,6 +107,7 @@ Rules:
 - sql MUST be a single SELECT statement (no INSERT/UPDATE/DELETE/DDL, no multiple statements)
 - Use only the allowed tables: products, sales_records, sales_items, sales_forecast_results, stock_movements
 - Never use '*' (select explicit columns)
+- Her sorguda her kullanılan tablo için tenant_id = :tid koşulunu WHERE içinde ver (bind :tid).
 - Use named parameters like :limit, :start_date, :end_date, :product_id when needed
 - If user asks "en yüksek kâr" but no cost data exists, interpret as "en yüksek ciro" (sum line_total)
 - Default limit to 5 when user asks top N and N not specified
@@ -191,6 +197,9 @@ def _validate_sql(sql: str) -> None:
     if unknown:
         raise UnsafeSQL(f"Unknown/forbidden tables: {sorted(unknown)}")
 
+    if ":tid" not in raw.lower():
+        raise UnsafeSQL("Sorgu kiracı filtresi (:tid) içermiyor.")
+
 
 _CANDIDATE_MODELS = [
     "gemini-flash-latest",
@@ -254,10 +263,13 @@ def nl_to_sql(*, user_text: str) -> NL2SQLResult:
     return NL2SQLResult(sql=sql, params=params)
 
 
-def execute_safe_sql(db: Session, *, sql: str, params: Dict[str, Any]) -> List[Dict[str, Any]]:
+def execute_safe_sql(
+    db: Session, *, sql: str, params: Dict[str, Any], tenant_id: int
+) -> List[Dict[str, Any]]:
     _validate_sql(sql)
+    merged = {**params, "tid": tenant_id}
     with db.get_bind().connect() as conn:
-        res: Result = conn.execute(text(sql), params)
+        res: Result = conn.execute(text(sql), merged)
         rows = res.mappings().all()
         return [dict(r) for r in rows]
 
@@ -302,9 +314,9 @@ def _fallback_chart_hint(data: List[Dict[str, Any]]) -> Dict[str, Any]:
     return {"type": "none", "x": None, "y": None, "title": ""}
 
 
-def run_nlp_query(db: Session, *, user_text: str) -> NlpAnswer:
+def run_nlp_query(db: Session, *, user_text: str, tenant_id: int) -> NlpAnswer:
     r = nl_to_sql(user_text=user_text)
-    rows = execute_safe_sql(db, sql=r.sql, params=r.params)
+    rows = execute_safe_sql(db, sql=r.sql, params=r.params, tenant_id=tenant_id)
 
     normalized: List[Dict[str, Any]] = []
     for row in rows:
@@ -329,7 +341,7 @@ def run_nlp_query(db: Session, *, user_text: str) -> NlpAnswer:
     )
 
 
-def run_nlp_query_tuple(db: Session, *, user_text: str) -> Tuple[str, List[Dict[str, Any]]]:
+def run_nlp_query_tuple(db: Session, *, user_text: str, tenant_id: int) -> Tuple[str, List[Dict[str, Any]]]:
     """Eski arayüz (ikinci öğe rows)."""
-    res = run_nlp_query(db, user_text=user_text)
+    res = run_nlp_query(db, user_text=user_text, tenant_id=tenant_id)
     return res.sql, res.data

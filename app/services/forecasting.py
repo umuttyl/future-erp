@@ -13,11 +13,13 @@ from app.schemas.sales_forecast_result import SalesForecastResultCreate
 from app.services.forecast_results_service import forecast_results_service
 
 
-def _load_daily_demand(db: Session, *, product_id: Optional[int]) -> pd.DataFrame:
-    where = ""
-    params: Dict[str, Any] = {}
+def _load_daily_demand(
+    db: Session, *, tenant_id: int, product_id: Optional[int]
+) -> pd.DataFrame:
+    extra = ""
+    params: Dict[str, Any] = {"tenant_id": tenant_id}
     if product_id is not None:
-        where = "WHERE si.product_id = :product_id"
+        extra = " AND si.product_id = :product_id"
         params["product_id"] = product_id
 
     stmt = text(
@@ -27,13 +29,13 @@ def _load_daily_demand(db: Session, *, product_id: Optional[int]) -> pd.DataFram
           SUM(si.quantity) AS y
         FROM sales_records sr
         JOIN sales_items si ON si.sales_record_id = sr.id
-        {where}
+        WHERE sr.tenant_id = :tenant_id AND si.tenant_id = :tenant_id
+        {extra}
         GROUP BY sr.sale_date
         ORDER BY sr.sale_date
         """
     )
 
-    # pandas 1.x + SQLAlchemy 2.x uyumu için Connection kullan.
     with db.get_bind().connect() as conn:
         df = pd.read_sql_query(stmt, con=conn, params=params)
     if not df.empty:
@@ -52,6 +54,7 @@ def _confidence_from_interval(yhat: float, yhat_lower: float, yhat_upper: float)
 def run_prophet_forecast(
     db: Session,
     *,
+    tenant_id: int,
     horizon_days: int = 30,
     product_id: Optional[int] = None,
 ) -> SalesForecastResult:
@@ -59,7 +62,7 @@ def run_prophet_forecast(
     sales_records + sales_items verisini günlük toplam talebe çevirir,
     Prophet ile gelecek horizon_days gün tahmini üretir ve sales_forecast_results'a kaydeder.
     """
-    df = _load_daily_demand(db, product_id=product_id)
+    df = _load_daily_demand(db, tenant_id=tenant_id, product_id=product_id)
     if len(df.index) < 2:
         raise ValueError("Not enough sales data to train Prophet (need at least 2 days).")
 
@@ -104,5 +107,5 @@ def run_prophet_forecast(
         horizon_days=horizon_days,
         result_payload=payload,
     )
-    return forecast_results_service.create(db, to_save)
+    return forecast_results_service.create(db, tenant_id, to_save)
 

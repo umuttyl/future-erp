@@ -1,9 +1,89 @@
-import axios from 'axios'
+import axios, { type InternalAxiosRequestConfig } from 'axios'
+
+import { clearSession, getAccessToken, getRefreshToken, saveTokens } from './authSession'
 
 export const api = axios.create({
   baseURL: '/api',
   timeout: 20_000,
 })
+
+export type TokenPairOut = {
+  access_token: string
+  refresh_token: string
+  token_type?: string
+}
+
+export type AuthMe = {
+  id: number
+  tenant_id: number
+  email: string
+  role: string
+  permissions: string[]
+  tenant_name?: string | null
+  full_name?: string | null
+  department?: string | null
+}
+
+export type SignupOut = TokenPairOut & { tenant_slug: string }
+
+export type AuthUserRow = {
+  id: number
+  tenant_id: number
+  email: string
+  role: string
+  is_active: boolean
+}
+
+let refreshChain: Promise<void> | null = null
+
+async function refreshAccessToken(): Promise<void> {
+  const rt = getRefreshToken()
+  if (!rt) throw new Error('no_refresh')
+  const { data } = await api.post<TokenPairOut>('/auth/refresh', { refresh_token: rt }, { skipAuth: true })
+  saveTokens(data.access_token, data.refresh_token)
+}
+
+api.interceptors.request.use((config) => {
+  if (!config.skipAuth) {
+    const t = getAccessToken()
+    if (t) {
+      config.headers.Authorization = `Bearer ${t}`
+    }
+  }
+  return config
+})
+
+api.interceptors.response.use(
+  (r) => r,
+  async (error: unknown) => {
+    if (!axios.isAxiosError(error) || !error.config) throw error
+    const orig = error.config as InternalAxiosRequestConfig & { _retry?: boolean }
+    if (error.response?.status !== 401) throw error
+    if (orig.skipAuth) throw error
+    const url = String(orig.url ?? '')
+    if (
+      url.includes('/auth/refresh') ||
+      url.includes('/auth/login') ||
+      url.includes('/auth/signup')
+    ) {
+      throw error
+    }
+    if (orig._retry) throw error
+    orig._retry = true
+    try {
+      if (!refreshChain) {
+        refreshChain = refreshAccessToken().finally(() => {
+          refreshChain = null
+        })
+      }
+      await refreshChain
+      return api(orig)
+    } catch {
+      clearSession()
+      throw error
+    }
+  },
+)
 
 /** FastAPI global handler ``{ error: { code, message } }``; legacy ``detail`` desteklenir. */
 export function getApiErrorMessage(error: unknown, fallback: string): string {

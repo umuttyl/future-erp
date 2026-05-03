@@ -9,14 +9,17 @@ from app.schemas.product import ProductCreate, ProductUpdate, StockAdjustRequest
 
 
 class ProductsService:
-    def list(self, db: Session) -> List[Product]:
-        return list(db.scalars(select(Product).order_by(Product.id.desc())).all())
+    def list(self, db: Session, tenant_id: int) -> List[Product]:
+        stmt = select(Product).where(Product.tenant_id == tenant_id).order_by(Product.id.desc())
+        return list(db.scalars(stmt).all())
 
-    def get(self, db: Session, product_id: int) -> Optional[Product]:
-        return db.get(Product, product_id)
+    def get(self, db: Session, tenant_id: int, product_id: int) -> Optional[Product]:
+        stmt = select(Product).where(Product.id == product_id, Product.tenant_id == tenant_id)
+        return db.scalar(stmt)
 
-    def create(self, db: Session, data: ProductCreate) -> Product:
+    def create(self, db: Session, tenant_id: int, data: ProductCreate) -> Product:
         obj = Product(
+            tenant_id=tenant_id,
             sku=data.sku,
             name=data.name,
             category=data.category,
@@ -32,6 +35,7 @@ class ProductsService:
         if obj.stock_quantity > 0:
             db.add(
                 StockMovement(
+                    tenant_id=tenant_id,
                     product_id=obj.id,
                     movement_type="in",
                     change=obj.stock_quantity,
@@ -44,7 +48,9 @@ class ProductsService:
 
         return obj
 
-    def update(self, db: Session, product: Product, data: ProductUpdate) -> Product:
+    def update(self, db: Session, tenant_id: int, product: Product, data: ProductUpdate) -> Product:
+        if product.tenant_id != tenant_id:
+            raise ValueError("tenant mismatch")
         payload = data.model_dump(exclude_unset=True)
         for k, v in payload.items():
             setattr(product, k, v)
@@ -53,16 +59,21 @@ class ProductsService:
         db.refresh(product)
         return product
 
-    def delete(self, db: Session, product: Product) -> None:
+    def delete(self, db: Session, tenant_id: int, product: Product) -> None:
+        if product.tenant_id != tenant_id:
+            raise ValueError("tenant mismatch")
         db.delete(product)
         db.commit()
 
     def adjust_stock(
         self,
         db: Session,
+        tenant_id: int,
         product: Product,
         data: StockAdjustRequest,
     ) -> tuple[Product, StockMovement]:
+        if product.tenant_id != tenant_id:
+            raise ValueError("tenant mismatch")
         new_balance = (product.stock_quantity or 0) + data.change
         if new_balance < 0:
             raise ValueError(
@@ -71,6 +82,7 @@ class ProductsService:
 
         product.stock_quantity = new_balance
         movement = StockMovement(
+            tenant_id=tenant_id,
             product_id=product.id,
             movement_type=data.movement_type,
             change=data.change,
@@ -88,11 +100,12 @@ class ProductsService:
     def list_movements(
         self,
         db: Session,
+        tenant_id: int,
         *,
         product_id: Optional[int] = None,
         limit: int = 200,
     ) -> List[StockMovement]:
-        stmt = select(StockMovement).order_by(StockMovement.id.desc()).limit(limit)
+        stmt = select(StockMovement).where(StockMovement.tenant_id == tenant_id).order_by(StockMovement.id.desc()).limit(limit)
         if product_id is not None:
             stmt = stmt.where(StockMovement.product_id == product_id)
         return list(db.scalars(stmt).all())
