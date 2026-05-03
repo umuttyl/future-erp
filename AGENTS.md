@@ -32,7 +32,7 @@
 | Veritabanı | SQLite (dev), PostgreSQL (Faz 2+ — hedef; Faz 1 çekirdeği SQLite ile tamamlandı) |
 | AI / ML | OpenAI / Gemini SDK, Prophet (forecast), pandas |
 | Auth | JWT access + refresh, Argon2 password hash (Faz 1) |
-| Bildirim/Queue | (Yok — Faz 2/3'te Redis + Celery) |
+| Bildirim/Queue | **Dev:** in-process WebSocket (`app/realtime/`, Topbar bildirim merkezi). **Üretim hedefi:** Faz 2+ Redis + Celery |
 | Test | pytest, httpx, factory_boy (backend); Vitest, Playwright (frontend) |
 | DevOps | GitHub, Conventional Commits; Docker (Faz 4) |
 
@@ -50,13 +50,14 @@ Future_Erp/
 │   ├── models/           # SQLAlchemy ORM modelleri
 │   ├── schemas/          # Pydantic request/response şemaları
 │   ├── services/         # İş mantığı (route'lardan ÇAĞRILIR)
+│   ├── realtime/         # WebSocket hub (dev AI bildirim yayını)
 │   ├── ai_engine/        # Forecast/AI özel modülleri
 │   └── main.py           # FastAPI app factory
 ├── frontend/             # React UI
 │   └── src/
 │       ├── pages/        # Sayfa bileşenleri
-│       ├── components/   # Paylaşılan UI bileşenleri
-│       ├── layout/       # AppShell, Sidebar
+│       ├── components/   # Paylaşılan UI (örn. `layout/NotificationBell`, WS toast)
+│       ├── layout/       # AppShell, Topbar, yan menü
 │       └── lib/api.ts    # TÜM API çağrıları buradan geçer
 ├── scripts/              # CLI scriptleri (seed, db, vb.)
 ├── migrations/           # Alembic migration'ları (Faz 0c sonrası)
@@ -184,8 +185,8 @@ Future_Erp/
 | Faz | İçerik | Durum |
 |---|---|---|
 | **0** | Git + eklentiler + Alembic + seed + logging + pytest + Vitest iskeleti | Tamamlandı |
-| **1** | Auth + RBAC + multi-tenant + admin/manager/employee UI çekirdeği | **Çekirdek tamam** (SQLite; JWT access/refresh, `/api/auth/login` + `/api/auth/signup`, `User` HR alanları `full_name`/`department`, frontend Login/Signup/Dashboard/Admin). Postgres geçişi **Faz 2** |
-| **2** | CRM + Satınalma + Muhasebe (light) + Çoklu depo + HR + Doc + Raporlama + Bildirim | Bekliyor |
+| **1** | Auth + RBAC + multi-tenant + admin/manager/employee UI çekirdeği | **Çekirdek tamam** (SQLite; JWT access/refresh, `/api/auth/login` + `/api/auth/signup`, `User` HR alanları `full_name`/`department`, frontend Login/Signup/Dashboard/Admin). **Ek (UX):** WebSocket AI bildirimleri (`/api/ws/notifications`), Topbar bildirim merkezi (mute, toast limiti), stok **Actionable AI** (`/api/inventory/{id}/auto-draft`, `is_ai_override`), HR performans API. Postgres geçişi **Faz 2** |
+| **2** | CRM + Satınalma + Muhasebe (light) + Çoklu depo + HR + Doc + Raporlama + Bildirim (Redis/Celery) | Bekliyor (gerçek zamanlı kuyruk; dev WS + UI hazır) |
 | **3** | TR lokalizasyon + e-Fatura + Agentic NLP + Excel auto-import + Anomali + WhatsApp bot + Perakende şablonu | Bekliyor |
 | **4** | SaaS multi-tenant + abonelik (Stripe/İyzico) + PWA + marketing | Bekliyor |
 
@@ -200,6 +201,7 @@ Detay için: `c:\Users\pc\.cursor\plans\future_erp_*.plan.md`.
 - DB config: [app/core/db.py](app/core/db.py)
 - Frontend giriş: [frontend/src/App.tsx](frontend/src/App.tsx)
 - API client: [frontend/src/lib/api.ts](frontend/src/lib/api.ts)
+- WS bildirim (dev): [app/api/routes/ws_notifications.py](app/api/routes/ws_notifications.py) · hub: [app/realtime/notification_ws_hub.py](app/realtime/notification_ws_hub.py) · UI: [frontend/src/components/layout/NotificationBell.tsx](frontend/src/components/layout/NotificationBell.tsx)
 - Pytest: kök `pytest` (geliştirme: `requirements-dev.txt`).
 - Vitest: `cd frontend && npm run test`.
 

@@ -12,6 +12,15 @@ import {
   YAxis,
 } from 'recharts'
 
+import { GlobalCard, GlobalCardHeader } from '../components/ui/GlobalCard'
+import { PageLayout } from '../components/ui/PageLayout'
+import {
+  ghostButtonClass,
+  inputFieldClass,
+  primaryButtonClass,
+  secondaryButtonClass,
+} from '../components/ui/forms'
+import { useTheme } from '../context/ThemeContext'
 import {
   api,
   formatCurrency,
@@ -46,6 +55,11 @@ function iso(d: string) {
 }
 
 export function AiAnalysisPage() {
+  const { theme } = useTheme()
+  const isDark = theme === 'dark'
+  const gridStroke = isDark ? '#334155' : '#cbd5e1'
+  const axisStroke = isDark ? '#94a3b8' : '#64748b'
+
   const [insights, setInsights] = useState<AiInsights | null>(null)
   const [insightsLoading, setInsightsLoading] = useState(true)
   const [insightsError, setInsightsError] = useState<string | null>(null)
@@ -66,7 +80,7 @@ export function AiAnalysisPage() {
       setInsightsError(null)
       const { data } = await api.get<AiInsights>('/ai/insights')
       setInsights(data)
-    } catch (e: any) {
+    } catch (e: unknown) {
       setInsightsError(getApiErrorMessage(e, 'AI özeti yüklenemedi'))
     } finally {
       setInsightsLoading(false)
@@ -89,8 +103,8 @@ export function AiAnalysisPage() {
   }
 
   useEffect(() => {
-    loadInsights()
-    loadSupporting()
+    void loadInsights()
+    void loadSupporting()
   }, [])
 
   const latestProphet = useMemo(() => {
@@ -105,15 +119,15 @@ export function AiAnalysisPage() {
       map.set(key, { date: key, actualQty: p.quantity })
     }
     const fDaily = latestProphet?.result_payload?.daily ?? []
-    for (const p of fDaily as any[]) {
-      const key = iso(p.date)
+    for (const p of fDaily as Record<string, unknown>[]) {
+      const key = iso(String(p.date))
       const cur = map.get(key) ?? { date: key }
       cur.forecastQty =
         typeof p.quantity === 'number'
           ? p.quantity
           : typeof p.value === 'number'
-          ? p.value
-          : undefined
+            ? p.value
+            : undefined
       cur.lower = typeof p.yhat_lower === 'number' ? p.yhat_lower : undefined
       cur.upper = typeof p.yhat_upper === 'number' ? p.yhat_upper : undefined
       map.set(key, cur)
@@ -126,7 +140,7 @@ export function AiAnalysisPage() {
     try {
       await api.post('/forecast/prophet/run', { horizon_days: 30 })
       await loadSupporting()
-    } catch (e: any) {
+    } catch (e: unknown) {
       alert(getApiErrorMessage(e, 'Tahmin çalıştırılamadı'))
     } finally {
       setForecastBusy(false)
@@ -143,7 +157,7 @@ export function AiAnalysisPage() {
     try {
       const { data } = await api.post<NlpQueryResponse>('/nlp/query', { text: q })
       setQResult(data)
-    } catch (e: any) {
+    } catch (e: unknown) {
       setQError(getApiErrorMessage(e, 'Soru çalıştırılamadı'))
     } finally {
       setQLoading(false)
@@ -151,38 +165,32 @@ export function AiAnalysisPage() {
   }
 
   return (
-    <div className="space-y-6">
-      <div className="flex flex-wrap items-end justify-between gap-4">
-        <div>
-          <div className="text-2xl font-semibold text-slate-100">AI Analizi</div>
-          <div className="mt-1 text-sm text-slate-400">
-            Gemini destekli içgörüler, Prophet tabanlı talep tahmini ve doğal dil sorguları.
-          </div>
-        </div>
+    <PageLayout
+      title="AI Analizi"
+      subtitle="Gemini destekli içgörüler, Prophet tabanlı talep tahmini ve doğal dil sorguları."
+      actions={
         <button
-          onClick={loadInsights}
+          type="button"
+          onClick={() => void loadInsights()}
           disabled={insightsLoading}
-          className="rounded-xl border border-slate-800 bg-slate-900/40 px-4 py-2 text-sm text-slate-200 hover:bg-slate-800 disabled:opacity-50"
+          className={secondaryButtonClass + ' disabled:opacity-50'}
         >
           {insightsLoading ? 'Yükleniyor…' : 'İçgörüyü Yenile'}
         </button>
-      </div>
-
-      <section className="rounded-2xl border border-sky-500/30 bg-gradient-to-br from-sky-500/10 via-slate-900/40 to-slate-900/60 p-6">
-        <div className="text-xs uppercase tracking-wide text-sky-300">AI Headline</div>
-        <div className="mt-2 text-xl font-semibold text-slate-100">
+      }
+    >
+      <div className="rounded-2xl border border-violet-300/40 bg-gradient-to-br from-slate-900 via-indigo-950 to-slate-900 p-6 text-white shadow-md dark:border-violet-500/25">
+        <div className="text-xs font-semibold uppercase tracking-wide text-violet-200">AI headline</div>
+        <div className="mt-2 text-xl font-semibold text-white">
           {insightsLoading
             ? 'AI işletme verilerinizi analiz ediyor…'
             : insightsError
-            ? `Hata: ${insightsError}`
-            : insights?.headline ?? '—'}
+              ? `Hata: ${insightsError}`
+              : (insights?.headline ?? '—')}
         </div>
         {insights && (
-          <div className="mt-3 flex flex-wrap items-center gap-3 text-xs text-slate-300">
-            <Chip
-              label="Son 30 gün ciro"
-              value={formatCurrency(insights.context.summary_last_30.revenue)}
-            />
+          <div className="mt-3 flex flex-wrap items-center gap-3 text-xs">
+            <Chip label="Son 30 gün ciro" value={formatCurrency(insights.context.summary_last_30.revenue)} />
             <Chip
               label="Ciro değişimi"
               value={`${insights.context.revenue_growth_pct >= 0 ? '+' : ''}${insights.context.revenue_growth_pct.toFixed(2)}%`}
@@ -193,47 +201,41 @@ export function AiAnalysisPage() {
               value={formatNumber(insights.context.low_stock_products.length)}
               accent={insights.context.low_stock_products.length > 0 ? 'critical' : 'positive'}
             />
-            <Chip
-              label="Aktif SKU"
-              value={formatNumber(insights.context.total_skus)}
-            />
+            <Chip label="Aktif SKU" value={formatNumber(insights.context.total_skus)} />
           </div>
         )}
+      </div>
+
+      <section className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
+        {insightsLoading && <HighlightSkeleton />}
+        {insightsLoading && <HighlightSkeleton />}
+        {insightsLoading && <HighlightSkeleton />}
+        {!insightsLoading && (insights?.highlights ?? []).map((h, i) => <HighlightCard key={i} h={h} />)}
       </section>
 
-      <section className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
-        {insightsLoading && <HighlightSkeleton />}
-        {insightsLoading && <HighlightSkeleton />}
-        {insightsLoading && <HighlightSkeleton />}
-        {!insightsLoading &&
-          (insights?.highlights ?? []).map((h, i) => <HighlightCard key={i} h={h} />)}
-      </section>
-
-      <section className="grid grid-cols-1 gap-4 lg:grid-cols-3">
-        <div className="rounded-2xl border border-slate-800 bg-slate-900/30 p-5 lg:col-span-2">
-          <div className="mb-3 flex items-center justify-between">
-            <div>
-              <div className="text-sm font-semibold text-slate-200">
-                Talep Tahmini (Prophet)
-              </div>
-              <div className="text-xs text-slate-500">
-                Geçmiş satışlar + 30 günlük AI tahmini.{' '}
-                {latestProphet
-                  ? `Son eğitim: ${formatDate(latestProphet.created_at)}`
-                  : 'Henüz tahmin yok.'}
-              </div>
-            </div>
-            <button
-              onClick={runProphet}
-              disabled={forecastBusy}
-              className="rounded-lg bg-sky-500 px-4 py-2 text-sm font-semibold text-slate-950 hover:bg-sky-400 disabled:opacity-50"
-            >
-              {forecastBusy ? 'Çalışıyor…' : 'Tahmini Yenile'}
-            </button>
-          </div>
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
+        <GlobalCard className="lg:col-span-2">
+          <GlobalCardHeader
+            title="Talep tahmini (Prophet)"
+            description={
+              latestProphet
+                ? `Geçmiş satışlar + tahmin. Son eğitim: ${formatDate(latestProphet.created_at)}`
+                : 'Henüz tahmin yok.'
+            }
+            right={
+              <button
+                type="button"
+                onClick={() => void runProphet()}
+                disabled={forecastBusy}
+                className={primaryButtonClass + ' disabled:opacity-50'}
+              >
+                {forecastBusy ? 'Çalışıyor…' : 'Tahmini yenile'}
+              </button>
+            }
+          />
           <div className="h-[320px]">
             {chartData.length === 0 ? (
-              <div className="flex h-full items-center justify-center text-sm text-slate-400">
+              <div className="flex h-full items-center justify-center text-sm text-slate-500 dark:text-slate-400">
                 Henüz satış/tahmin verisi yok.
               </div>
             ) : (
@@ -249,19 +251,23 @@ export function AiAnalysisPage() {
                       <stop offset="95%" stopColor="#60a5fa" stopOpacity={0.02} />
                     </linearGradient>
                   </defs>
-                  <CartesianGrid stroke="#1f2937" strokeDasharray="3 3" />
-                  <XAxis dataKey="date" stroke="#94a3b8" tick={{ fontSize: 12 }} />
-                  <YAxis stroke="#94a3b8" tick={{ fontSize: 12 }} />
+                  <CartesianGrid stroke={gridStroke} strokeDasharray="3 3" />
+                  <XAxis dataKey="date" stroke={axisStroke} tick={{ fontSize: 12 }} />
+                  <YAxis stroke={axisStroke} tick={{ fontSize: 12 }} />
                   <Tooltip
-                    contentStyle={{ background: '#0b1220', border: '1px solid #1f2937', borderRadius: 12 }}
-                    labelStyle={{ color: '#e2e8f0' }}
-                    itemStyle={{ color: '#e2e8f0' }}
+                    contentStyle={{
+                      background: isDark ? '#0f172a' : '#ffffff',
+                      border: isDark ? '1px solid #334155' : '1px solid #e2e8f0',
+                      borderRadius: 12,
+                    }}
+                    labelStyle={{ color: isDark ? '#e2e8f0' : '#0f172a' }}
+                    itemStyle={{ color: isDark ? '#e2e8f0' : '#334155' }}
                   />
                   <Legend />
                   <Area
                     type="monotone"
                     dataKey="actualQty"
-                    name="Gerçek Talep"
+                    name="Gerçek talep"
                     stroke="#22c55e"
                     fill="url(#ai-actual)"
                   />
@@ -294,12 +300,12 @@ export function AiAnalysisPage() {
               </ResponsiveContainer>
             )}
           </div>
-        </div>
+        </GlobalCard>
 
-        <div className="rounded-2xl border border-slate-800 bg-slate-900/30 p-5">
-          <div className="mb-3 text-sm font-semibold text-slate-200">Stok Uyarıları</div>
+        <GlobalCard>
+          <GlobalCardHeader title="Stok uyarıları" description="Eşik altı ürünler" />
           {alerts.length === 0 ? (
-            <div className="rounded-lg border border-emerald-500/30 bg-emerald-500/10 p-3 text-sm text-emerald-200">
+            <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-900 dark:border-emerald-500/30 dark:bg-emerald-950/40 dark:text-emerald-100">
               Şu an kritik seviyede olan ürün yok.
             </div>
           ) : (
@@ -307,14 +313,14 @@ export function AiAnalysisPage() {
               {alerts.map((a) => (
                 <li
                   key={a.id}
-                  className="flex items-center justify-between rounded-lg border border-rose-500/20 bg-rose-500/5 px-3 py-2"
+                  className="flex items-center justify-between rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 dark:border-rose-500/25 dark:bg-rose-950/30"
                 >
                   <div>
-                    <div className="font-semibold text-slate-100">{a.name}</div>
-                    <div className="text-xs text-slate-400">{a.sku}</div>
+                    <div className="font-semibold text-slate-900 dark:text-slate-100">{a.name}</div>
+                    <div className="text-xs text-slate-600 dark:text-slate-400">{a.sku}</div>
                   </div>
                   <div className="text-right">
-                    <div className="font-mono text-rose-200">
+                    <div className="font-mono font-semibold text-rose-800 dark:text-rose-200">
                       {a.stock_quantity} / {a.reorder_level}
                     </div>
                     <div className="text-[10px] text-slate-500">stok / eşik</div>
@@ -323,16 +329,14 @@ export function AiAnalysisPage() {
               ))}
             </ul>
           )}
-        </div>
-      </section>
+        </GlobalCard>
+      </div>
 
-      <section className="rounded-2xl border border-slate-800 bg-slate-900/30 p-5">
-        <div className="mb-3 flex items-center justify-between">
-          <div>
-            <div className="text-sm font-semibold text-slate-200">Aylık Trend</div>
-            <div className="text-xs text-slate-500">Son aylardaki ciro ve sipariş hacmi.</div>
-          </div>
-        </div>
+      <GlobalCard>
+        <GlobalCardHeader
+          title="Aylık trend"
+          description="Son aylardaki ciro ve sipariş hacmi."
+        />
         <div className="h-[260px]">
           {insights ? (
             <ResponsiveContainer width="100%" height="100%">
@@ -340,23 +344,25 @@ export function AiAnalysisPage() {
                 data={insights.context.monthly_revenue}
                 margin={{ top: 10, right: 16, left: 0, bottom: 0 }}
               >
-                <CartesianGrid stroke="#1f2937" strokeDasharray="3 3" />
-                <XAxis dataKey="month" stroke="#94a3b8" tick={{ fontSize: 12 }} />
+                <CartesianGrid stroke={gridStroke} strokeDasharray="3 3" />
+                <XAxis dataKey="month" stroke={axisStroke} tick={{ fontSize: 12 }} />
                 <YAxis
                   yAxisId="left"
-                  stroke="#94a3b8"
+                  stroke={axisStroke}
                   tick={{ fontSize: 12 }}
-                  tickFormatter={(v) =>
-                    new Intl.NumberFormat('tr-TR', { notation: 'compact' }).format(v)
-                  }
+                  tickFormatter={(v) => new Intl.NumberFormat('tr-TR', { notation: 'compact' }).format(Number(v))}
                 />
-                <YAxis yAxisId="right" orientation="right" stroke="#94a3b8" tick={{ fontSize: 12 }} />
+                <YAxis yAxisId="right" orientation="right" stroke={axisStroke} tick={{ fontSize: 12 }} />
                 <Tooltip
-                  contentStyle={{ background: '#0b1220', border: '1px solid #1f2937', borderRadius: 12 }}
-                  formatter={(value: any, name: any) =>
+                  contentStyle={{
+                    background: isDark ? '#0f172a' : '#ffffff',
+                    border: isDark ? '1px solid #334155' : '1px solid #e2e8f0',
+                    borderRadius: 12,
+                  }}
+                  formatter={(value: unknown, name: unknown) =>
                     name === 'Ciro'
-                      ? [formatCurrency(Number(value)), name]
-                      : [formatNumber(Number(value)), name]
+                      ? [formatCurrency(Number(value)), String(name)]
+                      : [formatNumber(Number(value)), String(name)]
                   }
                 />
                 <Legend />
@@ -375,30 +381,28 @@ export function AiAnalysisPage() {
                   name="Sipariş"
                   stroke="#22c55e"
                   strokeWidth={2}
+                  dot={{ r: 3 }}
                 />
               </ComposedChart>
             </ResponsiveContainer>
           ) : (
-            <div className="flex h-full items-center justify-center text-sm text-slate-400">
-              Yükleniyor…
-            </div>
+            <div className="flex h-full items-center justify-center text-sm text-slate-500">Yükleniyor…</div>
           )}
         </div>
-      </section>
+      </GlobalCard>
 
-      <section className="rounded-2xl border border-slate-800 bg-slate-900/30 p-5">
-        <div className="mb-3">
-          <div className="text-sm font-semibold text-slate-200">AI'ya Hızlı Soru</div>
-          <div className="text-xs text-slate-500">
-            Doğal dilde veriniz hakkında soru sorun, AI uygun SQL'i üretip cevap yazsın.
-          </div>
-        </div>
+      <GlobalCard>
+        <GlobalCardHeader
+          title="AI'ya hızlı soru"
+          description="Doğal dilde sorun; uygun SQL üretilir ve cevap yazılır."
+        />
         <div className="flex flex-wrap gap-2">
           {SAMPLE_QUESTIONS.map((q) => (
             <button
               key={q}
-              onClick={() => askQuestion(q)}
-              className="rounded-full border border-slate-800 bg-slate-900/40 px-3 py-1.5 text-xs text-slate-300 hover:bg-slate-800"
+              type="button"
+              onClick={() => void askQuestion(q)}
+              className={ghostButtonClass + ' rounded-full text-xs'}
             >
               {q}
             </button>
@@ -409,39 +413,40 @@ export function AiAnalysisPage() {
             value={question}
             onChange={(e) => setQuestion(e.target.value)}
             onKeyDown={(e) => {
-              if (e.key === 'Enter' && !qLoading) askQuestion()
+              if (e.key === 'Enter' && !qLoading) void askQuestion()
             }}
             placeholder="Örn: En yüksek stokta olan 3 kategoriyi listele"
-            className="flex-1 rounded-lg border border-slate-800 bg-slate-900/40 px-3 py-2 text-sm text-slate-100 placeholder:text-slate-500 outline-none focus:border-slate-600"
+            className={inputFieldClass + ' flex-1'}
           />
           <button
-            onClick={() => askQuestion()}
+            type="button"
+            onClick={() => void askQuestion()}
             disabled={qLoading || question.trim().length < 3}
-            className="rounded-lg bg-sky-500 px-4 py-2 text-sm font-semibold text-slate-950 hover:bg-sky-400 disabled:opacity-50"
+            className={primaryButtonClass + ' shrink-0 disabled:opacity-50'}
           >
             {qLoading ? 'Düşünüyor…' : 'Sor'}
           </button>
         </div>
 
         {qError && (
-          <div className="mt-3 rounded-lg border border-rose-500/30 bg-rose-500/10 px-3 py-2 text-sm text-rose-200">
+          <div className="mt-3 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-800 dark:border-rose-500/30 dark:bg-rose-950/40 dark:text-rose-100">
             Hata: {qError}
           </div>
         )}
 
         {qResult && (
           <div className="mt-4 space-y-3">
-            <div className="whitespace-pre-wrap rounded-xl border border-sky-500/30 bg-sky-500/5 px-4 py-3 text-slate-100">
+            <div className="whitespace-pre-wrap rounded-xl border border-sky-200 bg-sky-50 px-4 py-3 text-sm text-slate-800 dark:border-sky-500/30 dark:bg-sky-950/40 dark:text-slate-100">
               {qResult.answer}
             </div>
             {qResult.data.length > 0 && (
-              <div className="overflow-hidden rounded-xl border border-slate-800 bg-slate-950/40">
+              <div className="overflow-hidden rounded-xl border border-slate-200 dark:border-white/10">
                 <div className="max-h-[340px] overflow-auto">
                   <table className="min-w-full text-sm">
                     <thead>
-                      <tr className="sticky top-0 bg-slate-900/90 text-left text-[11px] uppercase tracking-wide text-slate-400">
+                      <tr className="sticky top-0 bg-slate-100 text-left text-[11px] font-semibold uppercase tracking-wide text-slate-600 dark:bg-slate-900/95 dark:text-slate-400">
                         {qResult.columns.map((c) => (
-                          <th key={c} className="px-3 py-2 font-semibold">
+                          <th key={c} className="px-3 py-2">
                             {c}
                           </th>
                         ))}
@@ -449,9 +454,9 @@ export function AiAnalysisPage() {
                     </thead>
                     <tbody>
                       {qResult.data.map((row, i) => (
-                        <tr key={i} className="border-t border-slate-800/60">
+                        <tr key={i} className="border-t border-slate-100 dark:border-white/5">
                           {qResult.columns.map((c) => (
-                            <td key={c} className="px-3 py-2 text-slate-200">
+                            <td key={c} className="px-3 py-2 text-slate-800 dark:text-slate-200">
                               {formatCellLoose(c, (row as Record<string, unknown>)[c])}
                             </td>
                           ))}
@@ -462,16 +467,18 @@ export function AiAnalysisPage() {
                 </div>
               </div>
             )}
-            <details className="text-[11px] text-slate-500">
-              <summary className="cursor-pointer select-none">Kullanılan SQL</summary>
-              <pre className="mt-2 max-h-40 overflow-auto rounded-lg border border-slate-800 bg-slate-950 p-2 text-[11px] text-slate-300">
+            <details className="text-[11px] text-slate-500 dark:text-slate-400">
+              <summary className="cursor-pointer select-none font-medium text-slate-700 dark:text-slate-300">
+                Kullanılan SQL
+              </summary>
+              <pre className="mt-2 max-h-40 overflow-auto rounded-lg border border-slate-200 bg-slate-100 p-2 text-[11px] text-slate-800 dark:border-white/10 dark:bg-slate-950 dark:text-slate-300">
                 {qResult.sql}
               </pre>
             </details>
           </div>
         )}
-      </section>
-    </div>
+      </GlobalCard>
+    </PageLayout>
   )
 }
 
@@ -505,15 +512,15 @@ function Chip({
 }) {
   const cls =
     accent === 'positive'
-      ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-200'
+      ? 'border-white/20 bg-white/10 text-emerald-100'
       : accent === 'warning'
-      ? 'border-amber-500/30 bg-amber-500/10 text-amber-200'
-      : accent === 'critical'
-      ? 'border-rose-500/30 bg-rose-500/10 text-rose-200'
-      : 'border-slate-800 bg-slate-900/40 text-slate-200'
+        ? 'border-white/20 bg-white/10 text-amber-100'
+        : accent === 'critical'
+          ? 'border-white/20 bg-white/10 text-rose-100'
+          : 'border-white/15 bg-white/5 text-slate-100'
   return (
     <div className={['rounded-xl border px-3 py-1.5', cls].join(' ')}>
-      <span className="text-[10px] uppercase tracking-wide opacity-80">{label}</span>
+      <span className="text-[10px] uppercase tracking-wide opacity-90">{label}</span>
       <span className="ml-2 text-sm font-semibold">{value}</span>
     </div>
   )
@@ -522,32 +529,35 @@ function Chip({
 function HighlightCard({ h }: { h: AiHighlight }) {
   const cfg = severityConfig(h.severity)
   return (
-    <div className={['rounded-2xl border p-5', cfg.wrapper].join(' ')}>
+    <GlobalCard className={['border-l-4', cfg.borderLeft].join(' ')}>
       <div className="flex items-center gap-2">
-        <span className={['h-2 w-2 rounded-full', cfg.dot].join(' ')} />
-        <div className={['text-xs font-semibold uppercase tracking-wide', cfg.label].join(' ')}>
-          {cfg.name}
-        </div>
+        <span className={['h-2 w-2 shrink-0 rounded-full', cfg.dot].join(' ')} />
+        <div className={['text-xs font-semibold uppercase tracking-wide', cfg.label].join(' ')}>{cfg.name}</div>
       </div>
-      <div className="mt-2 text-sm font-semibold text-slate-100">{h.title}</div>
-      <div className="mt-1 text-sm text-slate-300">{h.body}</div>
-      {h.metric && (
-        <div className="mt-3 inline-block rounded-lg border border-slate-800 bg-slate-900/40 px-2 py-1 text-[11px] font-mono text-slate-200">
+      <div className={['mt-2 text-sm font-semibold', cfg.titleClass].join(' ')}>{h.title}</div>
+      <div className={['mt-1 text-sm', cfg.bodyClass].join(' ')}>{h.body}</div>
+      {h.metric ? (
+        <div
+          className={[
+            'mt-3 inline-block rounded-lg border px-2 py-1 text-[11px] font-mono',
+            cfg.metricBox,
+          ].join(' ')}
+        >
           {h.metric}
         </div>
-      )}
-    </div>
+      ) : null}
+    </GlobalCard>
   )
 }
 
 function HighlightSkeleton() {
   return (
-    <div className="animate-pulse rounded-2xl border border-slate-800 bg-slate-900/30 p-5">
-      <div className="h-3 w-16 rounded bg-slate-800" />
-      <div className="mt-3 h-4 w-3/4 rounded bg-slate-800" />
-      <div className="mt-2 h-3 w-full rounded bg-slate-800" />
-      <div className="mt-1 h-3 w-2/3 rounded bg-slate-800" />
-    </div>
+    <GlobalCard className="animate-pulse">
+      <div className="h-3 w-16 rounded bg-slate-200 dark:bg-slate-700" />
+      <div className="mt-3 h-4 w-3/4 rounded bg-slate-200 dark:bg-slate-700" />
+      <div className="mt-2 h-3 w-full rounded bg-slate-200 dark:bg-slate-700" />
+      <div className="mt-1 h-3 w-2/3 rounded bg-slate-200 dark:bg-slate-700" />
+    </GlobalCard>
   )
 }
 
@@ -556,30 +566,46 @@ function severityConfig(severity: AiHighlight['severity']) {
     case 'positive':
       return {
         name: 'Olumlu',
-        wrapper: 'border-emerald-500/30 bg-emerald-500/5',
-        dot: 'bg-emerald-400',
-        label: 'text-emerald-300',
+        borderLeft: 'border-l-emerald-500',
+        dot: 'bg-emerald-500',
+        label: 'text-emerald-700 dark:text-emerald-400',
+        titleClass: 'text-slate-900 dark:text-slate-50',
+        bodyClass: 'text-slate-700 dark:text-slate-300',
+        metricBox:
+          'border-slate-200 bg-slate-100 text-slate-800 dark:border-white/10 dark:bg-black/20 dark:text-slate-200',
       }
     case 'warning':
       return {
         name: 'Uyarı',
-        wrapper: 'border-amber-500/30 bg-amber-500/5',
-        dot: 'bg-amber-400',
-        label: 'text-amber-300',
+        borderLeft: 'border-l-amber-500',
+        dot: 'bg-amber-500',
+        label: 'text-amber-800 dark:text-amber-300',
+        titleClass: 'text-slate-900 dark:text-slate-50',
+        bodyClass: 'text-slate-700 dark:text-slate-300',
+        metricBox:
+          'border-amber-200 bg-amber-50 text-amber-950 dark:border-amber-500/20 dark:bg-amber-950/40 dark:text-amber-100',
       }
     case 'critical':
       return {
         name: 'Kritik',
-        wrapper: 'border-rose-500/30 bg-rose-500/5',
-        dot: 'bg-rose-400',
-        label: 'text-rose-300',
+        borderLeft: 'border-l-rose-500',
+        dot: 'bg-rose-500',
+        label: 'text-rose-800 dark:text-rose-300',
+        titleClass: 'text-slate-900 dark:text-slate-50',
+        bodyClass: 'text-slate-700 dark:text-slate-300',
+        metricBox:
+          'border-rose-200 bg-rose-50 text-rose-950 dark:border-rose-500/20 dark:bg-rose-950/40 dark:text-rose-100',
       }
     default:
       return {
         name: 'Bilgi',
-        wrapper: 'border-slate-800 bg-slate-900/30',
-        dot: 'bg-sky-400',
-        label: 'text-sky-300',
+        borderLeft: 'border-l-sky-500',
+        dot: 'bg-sky-500',
+        label: 'text-sky-800 dark:text-sky-300',
+        titleClass: 'text-slate-900 dark:text-slate-50',
+        bodyClass: 'text-slate-700 dark:text-slate-300',
+        metricBox:
+          'border-slate-200 bg-slate-100 text-slate-800 dark:border-white/10 dark:bg-slate-900/60 dark:text-slate-200',
       }
   }
 }

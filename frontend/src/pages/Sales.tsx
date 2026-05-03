@@ -1,5 +1,16 @@
 import { useEffect, useMemo, useState } from 'react'
 
+import { GlobalCard, GlobalCardHeader } from '../components/ui/GlobalCard'
+import { PageLayout } from '../components/ui/PageLayout'
+import {
+  ghostButtonClass,
+  inputFieldClass,
+  primaryButtonClass,
+  secondaryButtonClass,
+  tableCellClass,
+  tableHeaderClass,
+  tableRowHoverClass,
+} from '../components/ui/forms'
 import {
   api,
   formatCurrency,
@@ -55,7 +66,7 @@ export function SalesPage() {
         if (!alive) return
         setRecords(recRes.data)
         setProducts(prodRes.data)
-      } catch (e: any) {
+      } catch (e: unknown) {
         if (!alive) return
         setError(getApiErrorMessage(e, 'Yükleme başarısız'))
       } finally {
@@ -93,29 +104,25 @@ export function SalesPage() {
   }
 
   return (
-    <div className="space-y-6">
-      <div className="flex items-end justify-between gap-4">
-        <div>
-          <div className="text-2xl font-semibold text-slate-100">Satış Kayıtları</div>
-          <div className="mt-1 text-sm text-slate-400">
-            Filtreleyerek satış tarihçesini inceleyin, detay için satıra tıklayın.
-          </div>
-        </div>
-        <div className="flex gap-3 text-xs text-slate-300">
+    <PageLayout
+      title="Satış Kayıtları"
+      subtitle="Filtreleyerek satış tarihçesini inceleyin; detay için satıra tıklayın."
+      actions={
+        <div className="flex flex-wrap gap-2 text-xs">
           <SummaryChip label="Sipariş" value={formatNumber(totals.orders)} />
           <SummaryChip label="Adet" value={formatNumber(totals.quantity)} />
           <SummaryChip label="Ciro" value={formatCurrency(totals.revenue)} highlight />
         </div>
-      </div>
-
-      <div className="rounded-2xl border border-slate-800 bg-slate-900/30 p-4">
+      }
+    >
+      <GlobalCard>
         <div className="grid grid-cols-1 gap-3 md:grid-cols-6">
           <LabeledField label="Başlangıç">
             <input
               type="date"
               value={filters.start_date}
               onChange={(e) => setFilters({ ...filters, start_date: e.target.value })}
-              className={inputCls}
+              className={inputFieldClass}
             />
           </LabeledField>
           <LabeledField label="Bitiş">
@@ -123,7 +130,7 @@ export function SalesPage() {
               type="date"
               value={filters.end_date}
               onChange={(e) => setFilters({ ...filters, end_date: e.target.value })}
-              className={inputCls}
+              className={inputFieldClass}
             />
           </LabeledField>
           <LabeledField label="Müşteri">
@@ -131,7 +138,7 @@ export function SalesPage() {
               value={filters.customer}
               onChange={(e) => setFilters({ ...filters, customer: e.target.value })}
               placeholder="Acme"
-              className={inputCls}
+              className={inputFieldClass}
             />
           </LabeledField>
           <LabeledField label="Ara (no / müşteri)">
@@ -139,7 +146,7 @@ export function SalesPage() {
               value={filters.search}
               onChange={(e) => setFilters({ ...filters, search: e.target.value })}
               placeholder="SO-..."
-              className={inputCls}
+              className={inputFieldClass}
             />
           </LabeledField>
           <LabeledField label="Min tutar">
@@ -149,29 +156,30 @@ export function SalesPage() {
               value={filters.min_amount}
               onChange={(e) => setFilters({ ...filters, min_amount: e.target.value })}
               placeholder="0"
-              className={inputCls}
+              className={inputFieldClass}
             />
           </LabeledField>
           <div className="flex items-end gap-2">
-            <button onClick={applyFilters} className={primaryBtn}>
+            <button type="button" onClick={applyFilters} className={primaryButtonClass}>
               Uygula
             </button>
-            <button onClick={clearFilters} className={ghostBtn}>
+            <button type="button" onClick={clearFilters} className={secondaryButtonClass}>
               Temizle
             </button>
           </div>
         </div>
-      </div>
+      </GlobalCard>
 
-      <div className="rounded-2xl border border-slate-800 bg-slate-900/30">
-        <div className="flex items-center justify-between border-b border-slate-800 px-4 py-3 text-sm text-slate-400">
-          <div>{loading ? 'Yükleniyor…' : `${records.length} kayıt`}</div>
-          {error && <div className="text-rose-300">Hata: {error}</div>}
-        </div>
-        <div className="overflow-x-auto">
+      <GlobalCard>
+        <GlobalCardHeader
+          title="Kayıtlar"
+          description={loading ? 'Yükleniyor…' : `${records.length} kayıt`}
+          right={error ? <span className="text-sm text-rose-600 dark:text-rose-300">Hata: {error}</span> : null}
+        />
+        <div className="-mx-5 overflow-x-auto border-t border-slate-100 dark:border-white/5">
           <table className="min-w-full text-sm">
             <thead>
-              <tr className="text-left text-xs uppercase tracking-wide text-slate-500">
+              <tr className={tableHeaderClass}>
                 <th className="px-4 py-3">Tarih</th>
                 <th className="px-4 py-3">Belge No</th>
                 <th className="px-4 py-3">Müşteri</th>
@@ -184,21 +192,19 @@ export function SalesPage() {
               {records.map((r) => {
                 const qty = r.items.reduce((acc, it) => acc + it.quantity, 0)
                 return (
-                  <tr
-                    key={r.id}
-                    className="border-t border-slate-800/60 hover:bg-slate-900/40"
-                  >
-                    <td className="px-4 py-3 text-slate-300">{formatDate(r.sale_date)}</td>
-                    <td className="px-4 py-3 font-mono text-slate-200">{r.record_no}</td>
-                    <td className="px-4 py-3 text-slate-200">{r.customer_name ?? '—'}</td>
-                    <td className="px-4 py-3 text-right text-slate-300">{formatNumber(qty)}</td>
-                    <td className="px-4 py-3 text-right font-semibold text-slate-100">
+                  <tr key={r.id} className={tableRowHoverClass}>
+                    <td className={`px-4 py-3 ${tableCellClass}`}>{formatDate(r.sale_date)}</td>
+                    <td className={`px-4 py-3 font-mono ${tableCellClass}`}>{r.record_no}</td>
+                    <td className={`px-4 py-3 ${tableCellClass}`}>{r.customer_name ?? '—'}</td>
+                    <td className={`px-4 py-3 text-right ${tableCellClass}`}>{formatNumber(qty)}</td>
+                    <td className={`px-4 py-3 text-right font-semibold text-slate-900 dark:text-slate-100`}>
                       {formatCurrency(r.total_amount)}
                     </td>
                     <td className="px-4 py-3 text-right">
                       <button
+                        type="button"
                         onClick={() => setSelected(r)}
-                        className="rounded-lg border border-slate-700 px-3 py-1 text-xs text-slate-200 hover:bg-slate-800"
+                        className={ghostButtonClass + ' text-xs'}
                       >
                         Detay
                       </button>
@@ -208,7 +214,7 @@ export function SalesPage() {
               })}
               {!loading && records.length === 0 && (
                 <tr>
-                  <td colSpan={6} className="px-4 py-10 text-center text-sm text-slate-400">
+                  <td colSpan={6} className="px-4 py-10 text-center text-sm text-slate-500 dark:text-slate-400">
                     Eşleşen satış kaydı bulunamadı.
                   </td>
                 </tr>
@@ -216,16 +222,12 @@ export function SalesPage() {
             </tbody>
           </table>
         </div>
-      </div>
+      </GlobalCard>
 
-      {selected && (
-        <DetailModal
-          record={selected}
-          productMap={productMap}
-          onClose={() => setSelected(null)}
-        />
-      )}
-    </div>
+      {selected ? (
+        <DetailModal record={selected} productMap={productMap} onClose={() => setSelected(null)} />
+      ) : null}
+    </PageLayout>
   )
 }
 
@@ -240,21 +242,28 @@ function DetailModal({
 }) {
   return (
     <div
-      className="fixed inset-0 z-40 flex items-center justify-center bg-slate-950/70 p-4"
+      className="fixed inset-0 z-40 flex items-center justify-center bg-slate-900/50 p-4 dark:bg-slate-950/70"
       onClick={onClose}
+      onKeyDown={(e) => e.key === 'Escape' && onClose()}
+      role="presentation"
     >
       <div
         onClick={(e) => e.stopPropagation()}
-        className="w-full max-w-2xl overflow-hidden rounded-2xl border border-slate-800 bg-slate-950 shadow-2xl"
+        role="dialog"
+        aria-modal="true"
+        className="w-full max-w-2xl overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl dark:border-white/10 dark:bg-[#16122b]"
       >
-        <div className="flex items-center justify-between border-b border-slate-800 px-5 py-4">
+        <div className="flex items-center justify-between border-b border-slate-200 px-5 py-4 dark:border-white/10">
           <div>
-            <div className="text-sm uppercase tracking-wide text-slate-500">Satış</div>
-            <div className="text-lg font-semibold text-slate-100">{record.record_no}</div>
+            <div className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+              Satış
+            </div>
+            <div className="text-lg font-semibold text-slate-900 dark:text-slate-100">{record.record_no}</div>
           </div>
           <button
+            type="button"
             onClick={onClose}
-            className="rounded-lg px-2 py-1 text-sm text-slate-300 hover:bg-slate-900"
+            className="rounded-lg px-2 py-1 text-sm text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-white/10"
           >
             Kapat
           </button>
@@ -263,17 +272,13 @@ function DetailModal({
         <div className="grid grid-cols-3 gap-4 px-5 py-4 text-sm">
           <InfoItem label="Tarih" value={formatDate(record.sale_date)} />
           <InfoItem label="Müşteri" value={record.customer_name ?? '—'} />
-          <InfoItem
-            label="Toplam"
-            value={formatCurrency(record.total_amount)}
-            accent
-          />
+          <InfoItem label="Toplam" value={formatCurrency(record.total_amount)} accent />
         </div>
 
-        <div className="border-t border-slate-800">
+        <div className="border-t border-slate-200 dark:border-white/10">
           <table className="min-w-full text-sm">
             <thead>
-              <tr className="text-left text-xs uppercase tracking-wide text-slate-500">
+              <tr className={tableHeaderClass}>
                 <th className="px-4 py-3">Ürün</th>
                 <th className="px-4 py-3 text-right">Adet</th>
                 <th className="px-4 py-3 text-right">Birim</th>
@@ -284,17 +289,13 @@ function DetailModal({
               {record.items.map((it) => {
                 const p = productMap.get(it.product_id)
                 return (
-                  <tr key={it.id} className="border-t border-slate-800/60">
-                    <td className="px-4 py-3 text-slate-200">
+                  <tr key={it.id} className={tableRowHoverClass}>
+                    <td className={`px-4 py-3 ${tableCellClass}`}>
                       {p ? `${p.sku} · ${p.name}` : `#${it.product_id}`}
                     </td>
-                    <td className="px-4 py-3 text-right text-slate-300">
-                      {formatNumber(it.quantity)}
-                    </td>
-                    <td className="px-4 py-3 text-right text-slate-300">
-                      {formatCurrency(it.unit_price)}
-                    </td>
-                    <td className="px-4 py-3 text-right font-semibold text-slate-100">
+                    <td className={`px-4 py-3 text-right ${tableCellClass}`}>{formatNumber(it.quantity)}</td>
+                    <td className={`px-4 py-3 text-right ${tableCellClass}`}>{formatCurrency(it.unit_price)}</td>
+                    <td className={`px-4 py-3 text-right font-semibold text-slate-900 dark:text-slate-100`}>
                       {formatCurrency(it.line_total)}
                     </td>
                   </tr>
@@ -322,11 +323,11 @@ function SummaryChip({
       className={[
         'rounded-xl border px-3 py-2',
         highlight
-          ? 'border-sky-500/40 bg-sky-500/10 text-sky-100'
-          : 'border-slate-800 bg-slate-900/40 text-slate-200',
+          ? 'border-violet-200 bg-violet-50 text-violet-900 dark:border-violet-500/30 dark:bg-violet-950/40 dark:text-violet-100'
+          : 'border-slate-200 bg-slate-50 text-slate-800 dark:border-white/10 dark:bg-[#16122b] dark:text-slate-200',
       ].join(' ')}
     >
-      <div className="text-[10px] uppercase tracking-wide text-slate-400">{label}</div>
+      <div className="text-[10px] font-medium uppercase tracking-wide text-slate-500 dark:text-slate-400">{label}</div>
       <div className="mt-0.5 text-sm font-semibold">{value}</div>
     </div>
   )
@@ -341,7 +342,9 @@ function LabeledField({
 }) {
   return (
     <label className="flex flex-col gap-1">
-      <span className="text-[11px] uppercase tracking-wide text-slate-500">{label}</span>
+      <span className="text-[11px] font-medium uppercase tracking-wide text-slate-500 dark:text-slate-400">
+        {label}
+      </span>
       {children}
     </label>
   )
@@ -358,11 +361,11 @@ function InfoItem({
 }) {
   return (
     <div>
-      <div className="text-[11px] uppercase tracking-wide text-slate-500">{label}</div>
+      <div className="text-[11px] font-medium uppercase tracking-wide text-slate-500 dark:text-slate-400">{label}</div>
       <div
         className={[
           'mt-0.5 text-sm font-semibold',
-          accent ? 'text-sky-300' : 'text-slate-100',
+          accent ? 'text-violet-700 dark:text-violet-300' : 'text-slate-900 dark:text-slate-100',
         ].join(' ')}
       >
         {value}
@@ -370,12 +373,3 @@ function InfoItem({
     </div>
   )
 }
-
-const inputCls =
-  'rounded-lg border border-slate-800 bg-slate-900/40 px-3 py-2 text-sm text-slate-100 placeholder:text-slate-500 outline-none focus:border-slate-600'
-
-const primaryBtn =
-  'rounded-lg bg-sky-500 px-4 py-2 text-sm font-semibold text-slate-950 hover:bg-sky-400'
-
-const ghostBtn =
-  'rounded-lg border border-slate-800 px-4 py-2 text-sm text-slate-200 hover:bg-slate-900'

@@ -16,6 +16,7 @@ FINANCE_READ = "finance.read"
 FORECAST_RUN = "forecast.run"
 AI_INSIGHTS_READ = "ai.insights.read"
 NLP_QUERY_EXECUTE = "nlp.query.execute"
+HR_PERFORMANCE_READ = "hr.performance.read"
 
 ALL_PERMISSIONS: FrozenSet[str] = frozenset(
     {
@@ -32,6 +33,7 @@ ALL_PERMISSIONS: FrozenSet[str] = frozenset(
         FORECAST_RUN,
         AI_INSIGHTS_READ,
         NLP_QUERY_EXECUTE,
+        HR_PERFORMANCE_READ,
     }
 )
 
@@ -52,6 +54,7 @@ PERMISSION_MATRIX: dict[str, FrozenSet[str]] = {
             FORECAST_RUN,
             AI_INSIGHTS_READ,
             NLP_QUERY_EXECUTE,
+            HR_PERFORMANCE_READ,
         }
     ),
     ROLE_EMPLOYEE: frozenset(

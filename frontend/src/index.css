@@ -2,12 +2,51 @@
 @tailwind components;
 @tailwind utilities;
 
-html,
-body,
-#root {
-  height: 100%;
+@layer base {
+  :root {
+    --surface-bg: 248 250 252;
+    --surface-card: 255 255 255;
+    --surface-muted: 241 245 249;
+    --surface-border: 226 232 240;
+  }
+
+  .dark {
+    --surface-bg: 11 8 25;
+    --surface-card: 22 18 43;
+    --surface-muted: 30 27 46;
+    --surface-border: 55 48 92;
+  }
+
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+
+  body {
+    @apply min-h-full antialiased transition-colors duration-200 text-slate-900;
+    /* @apply bg-surface-bg kullanılmıyor: PostCSS bazen extend renklerini @layer base içinde çözmez */
+    background-color: rgb(var(--surface-bg) / 1);
+  }
+
+  html.dark body {
+    @apply text-slate-100;
+  }
 }
 
-body {
-  @apply bg-slate-950 text-slate-100;
+@keyframes ws-toast-in {
+  from {
+    opacity: 0;
+    transform: translateY(-10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@layer utilities {
+  .animate-ws-toast-in {
+    animation: ws-toast-in 0.35s ease-out forwards;
+  }
 }

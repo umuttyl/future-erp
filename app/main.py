@@ -8,6 +8,7 @@ Global exception handler'lar tek tip JSON hatasi döner:
 """
 from __future__ import annotations
 
+import asyncio
 from contextlib import asynccontextmanager
 from typing import Any
 
@@ -36,7 +37,22 @@ async def lifespan(app: FastAPI):
         env=settings.ENV,
     )
     ensure_dev_demo_users_if_empty()
+
+    ws_anomaly_task: asyncio.Task[None] | None = None
+    if settings.ENV.lower() != "prod":
+        from app.realtime.notification_ws_hub import spawn_anomaly_simulation_task
+
+        ws_anomaly_task = spawn_anomaly_simulation_task()
+        app.state.anomaly_ws_task = ws_anomaly_task
+
     yield
+
+    if ws_anomaly_task is not None:
+        ws_anomaly_task.cancel()
+        try:
+            await ws_anomaly_task
+        except asyncio.CancelledError:
+            pass
     logger.info("app_shutdown")
 
 
@@ -119,6 +135,7 @@ def register_exception_handlers(app: FastAPI) -> None:
 def create_app() -> FastAPI:
     app = FastAPI(title=settings.PROJECT_NAME, lifespan=lifespan)
     register_exception_handlers(app)
+    # HTTP CORS; WebSocket el sıkışması tarayıcı kökeni + Vite proxy (ws: true) ile aynı mantıkta çalışır.
     app.add_middleware(
         CORSMiddleware,
         allow_origins=settings.cors_origins_list(),

@@ -7,6 +7,7 @@ import { AiAnalysisPage } from './pages/AiAnalysis'
 import AdminPage from './pages/Admin'
 import { DashboardPage } from './pages/Dashboard'
 import { FinancePage } from './pages/Finance'
+import { HrPage } from './pages/Hr'
 import LoginPage from './pages/Login'
 import SignupPage from './pages/Signup'
 import { SalesPage } from './pages/Sales'
@@ -26,6 +27,7 @@ function App() {
             <Route path="stock" element={<StockPage />} />
             <Route path="finance" element={<FinancePage />} />
             <Route path="ai" element={<AiAnalysisPage />} />
+            <Route path="hr" element={<HrPage />} />
             <Route path="admin" element={<AdminPage />} />
           </Route>
         </Route>

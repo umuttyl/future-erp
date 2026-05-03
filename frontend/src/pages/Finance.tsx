@@ -13,6 +13,10 @@ import {
   YAxis,
 } from 'recharts'
 
+import { GlobalCard, GlobalCardHeader } from '../components/ui/GlobalCard'
+import { PageLayout } from '../components/ui/PageLayout'
+import { inputFieldClass, primaryButtonClass } from '../components/ui/forms'
+import { useTheme } from '../context/ThemeContext'
 import {
   api,
   formatCurrency,
@@ -35,6 +39,11 @@ function isoDaysAgo(days: number): string {
 }
 
 export function FinancePage() {
+  const { theme } = useTheme()
+  const isDark = theme === 'dark'
+  const gridStroke = isDark ? '#334155' : '#cbd5e1'
+  const axisStroke = isDark ? '#94a3b8' : '#64748b'
+
   const [start, setStart] = useState(isoDaysAgo(90))
   const [end, setEnd] = useState(isoToday())
   const [summary, setSummary] = useState<FinanceSummary | null>(null)
@@ -61,7 +70,7 @@ export function FinancePage() {
       setMonthly(mo.data)
       setCustomers(cu.data)
       setTopProducts(pr.data)
-    } catch (e: any) {
+    } catch (e: unknown) {
       setError(getApiErrorMessage(e, 'Yükleme başarısız'))
     } finally {
       setLoading(false)
@@ -69,7 +78,7 @@ export function FinancePage() {
   }
 
   useEffect(() => {
-    load(start, end)
+    void load(start, end)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
@@ -83,53 +92,31 @@ export function FinancePage() {
   )
 
   return (
-    <div className="space-y-6">
-      <div className="flex items-end justify-between gap-4">
-        <div>
-          <div className="text-2xl font-semibold text-slate-100">Finans Özeti</div>
-          <div className="mt-1 text-sm text-slate-400">
-            Seçili dönem için ciro, maliyet, marj ve en iyi performans gösteren müşteri/ürünler.
-          </div>
-        </div>
-
-        <div className="flex items-end gap-2 text-xs">
+    <PageLayout
+      title="Finans Özeti"
+      subtitle="Seçili dönem için ciro, maliyet, marj ve en iyi performans gösteren müşteri/ürünler."
+      actions={
+        <div className="flex flex-wrap items-end gap-2">
           <LabeledField label="Başlangıç">
-            <input
-              type="date"
-              value={start}
-              onChange={(e) => setStart(e.target.value)}
-              className={inputCls}
-            />
+            <input type="date" value={start} onChange={(e) => setStart(e.target.value)} className={inputFieldClass} />
           </LabeledField>
           <LabeledField label="Bitiş">
-            <input
-              type="date"
-              value={end}
-              onChange={(e) => setEnd(e.target.value)}
-              className={inputCls}
-            />
+            <input type="date" value={end} onChange={(e) => setEnd(e.target.value)} className={inputFieldClass} />
           </LabeledField>
-          <button
-            onClick={() => load(start, end)}
-            className="rounded-lg bg-sky-500 px-4 py-2 text-sm font-semibold text-slate-950 hover:bg-sky-400"
-          >
+          <button type="button" onClick={() => void load(start, end)} className={primaryButtonClass + ' self-end'}>
             Uygula
           </button>
         </div>
-      </div>
-
-      {error && (
-        <div className="rounded-xl border border-rose-500/30 bg-rose-500/10 px-4 py-3 text-sm text-rose-200">
+      }
+    >
+      {error ? (
+        <div className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-800 dark:border-rose-500/30 dark:bg-rose-950/40 dark:text-rose-100">
           Hata: {error}
         </div>
-      )}
+      ) : null}
 
-      <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
-        <Kpi
-          label="Ciro"
-          value={summary ? formatCurrency(summary.revenue) : '…'}
-          accent="sky"
-        />
+      <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
+        <Kpi label="Ciro" value={summary ? formatCurrency(summary.revenue) : '…'} accent="violet" />
         <Kpi
           label="Brüt Kâr"
           value={summary ? formatCurrency(summary.gross_profit) : '…'}
@@ -147,39 +134,43 @@ export function FinancePage() {
         />
       </div>
 
-      <div className="rounded-2xl border border-slate-800 bg-slate-900/30 p-5">
-        <div className="mb-3 flex items-center justify-between">
-          <div className="text-sm font-semibold text-slate-200">Aylık Ciro Trendi</div>
-          <div className="text-xs text-slate-500">
-            {monthly.length > 0 ? `${monthly[0].month} – ${monthly[monthly.length - 1].month}` : '—'}
-          </div>
-        </div>
+      <GlobalCard>
+        <GlobalCardHeader
+          title="Aylık ciro trendi"
+          description={
+            monthly.length > 0 ? `${monthly[0].month} – ${monthly[monthly.length - 1].month}` : '—'
+          }
+        />
         <div className="h-[320px]">
           {loading && monthly.length === 0 ? (
-            <div className="text-sm text-slate-400">Yükleniyor…</div>
+            <div className="text-sm text-slate-500 dark:text-slate-400">Yükleniyor…</div>
           ) : (
             <ResponsiveContainer width="100%" height="100%">
               <ComposedChart data={monthly} margin={{ top: 10, right: 16, left: 0, bottom: 0 }}>
-                <CartesianGrid stroke="#1f2937" strokeDasharray="3 3" />
-                <XAxis dataKey="month" stroke="#94a3b8" tick={{ fontSize: 12 }} />
+                <CartesianGrid stroke={gridStroke} strokeDasharray="3 3" />
+                <XAxis dataKey="month" stroke={axisStroke} tick={{ fontSize: 12 }} />
                 <YAxis
                   yAxisId="left"
-                  stroke="#94a3b8"
+                  stroke={axisStroke}
                   tick={{ fontSize: 12 }}
-                  tickFormatter={(v) => new Intl.NumberFormat('tr-TR', { notation: 'compact' }).format(v)}
+                  tickFormatter={(v) => new Intl.NumberFormat('tr-TR', { notation: 'compact' }).format(Number(v))}
                 />
-                <YAxis yAxisId="right" orientation="right" stroke="#94a3b8" tick={{ fontSize: 12 }} />
+                <YAxis yAxisId="right" orientation="right" stroke={axisStroke} tick={{ fontSize: 12 }} />
                 <Tooltip
-                  contentStyle={{ background: '#0b1220', border: '1px solid #1f2937', borderRadius: 12 }}
-                  labelStyle={{ color: '#e2e8f0' }}
-                  itemStyle={{ color: '#e2e8f0' }}
-                  formatter={(value: any, name: any) => {
-                    if (name === 'Ciro') return [formatCurrency(Number(value)), name]
-                    return [formatNumber(Number(value)), name]
+                  contentStyle={{
+                    background: isDark ? '#0f172a' : '#ffffff',
+                    border: isDark ? '1px solid #334155' : '1px solid #e2e8f0',
+                    borderRadius: 12,
+                  }}
+                  labelStyle={{ color: isDark ? '#e2e8f0' : '#0f172a' }}
+                  itemStyle={{ color: isDark ? '#e2e8f0' : '#334155' }}
+                  formatter={(value: unknown, name: unknown) => {
+                    if (name === 'Ciro') return [formatCurrency(Number(value)), String(name)]
+                    return [formatNumber(Number(value)), String(name)]
                   }}
                 />
                 <Legend />
-                <Bar yAxisId="left" dataKey="revenue" name="Ciro" fill="#60a5fa" radius={[6, 6, 0, 0]} />
+                <Bar yAxisId="left" dataKey="revenue" name="Ciro" fill="#8b5cf6" radius={[6, 6, 0, 0]} />
                 <Line
                   yAxisId="right"
                   type="monotone"
@@ -193,72 +184,73 @@ export function FinancePage() {
             </ResponsiveContainer>
           )}
         </div>
-      </div>
+      </GlobalCard>
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-        <div className="rounded-2xl border border-slate-800 bg-slate-900/30 p-5">
-          <div className="mb-3 text-sm font-semibold text-slate-200">En İyi Müşteriler</div>
+        <GlobalCard>
+          <GlobalCardHeader title="En iyi müşteriler" description="Seçili dönem" />
           <div className="space-y-2">
             {customers.map((c) => {
               const pct = (c.revenue / customersMaxRevenue) * 100
               return (
                 <div key={c.customer} className="text-sm">
                   <div className="flex items-center justify-between">
-                    <div className="text-slate-200">{c.customer}</div>
-                    <div className="font-semibold text-slate-100">
+                    <div className="font-medium text-slate-800 dark:text-slate-200">{c.customer}</div>
+                    <div className="font-semibold text-slate-900 dark:text-slate-100">
                       {formatCurrency(c.revenue)}
                     </div>
                   </div>
-                  <div className="mt-1 h-1.5 w-full overflow-hidden rounded-full bg-slate-800">
-                    <div className="h-full bg-sky-500" style={{ width: `${pct}%` }} />
+                  <div className="mt-1 h-1.5 w-full overflow-hidden rounded-full bg-slate-100 dark:bg-slate-800">
+                    <div className="h-full bg-violet-500" style={{ width: `${pct}%` }} />
                   </div>
-                  <div className="mt-0.5 text-xs text-slate-500">{c.orders} sipariş</div>
+                  <div className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">{c.orders} sipariş</div>
                 </div>
               )
             })}
-            {!loading && customers.length === 0 && (
-              <div className="text-sm text-slate-400">Veri yok.</div>
-            )}
+            {!loading && customers.length === 0 ? (
+              <div className="text-sm text-slate-500 dark:text-slate-400">Veri yok.</div>
+            ) : null}
           </div>
-        </div>
+        </GlobalCard>
 
-        <div className="rounded-2xl border border-slate-800 bg-slate-900/30 p-5">
-          <div className="mb-3 text-sm font-semibold text-slate-200">En Çok Satan Ürünler</div>
+        <GlobalCard>
+          <GlobalCardHeader title="En çok satan ürünler" description="Ciro bazlı" />
           <div className="h-[240px]">
             <ResponsiveContainer width="100%" height="100%">
               <BarChart data={topProducts} layout="vertical" margin={{ left: 12, right: 16 }}>
-                <CartesianGrid stroke="#1f2937" strokeDasharray="3 3" />
+                <CartesianGrid stroke={gridStroke} strokeDasharray="3 3" />
                 <XAxis
                   type="number"
-                  stroke="#94a3b8"
+                  stroke={axisStroke}
                   tick={{ fontSize: 12 }}
-                  tickFormatter={(v) =>
-                    new Intl.NumberFormat('tr-TR', { notation: 'compact' }).format(v)
-                  }
+                  tickFormatter={(v) => new Intl.NumberFormat('tr-TR', { notation: 'compact' }).format(Number(v))}
                 />
-                <YAxis dataKey="name" type="category" stroke="#94a3b8" tick={{ fontSize: 11 }} width={140} />
+                <YAxis dataKey="name" type="category" stroke={axisStroke} tick={{ fontSize: 11 }} width={140} />
                 <Tooltip
-                  contentStyle={{ background: '#0b1220', border: '1px solid #1f2937', borderRadius: 12 }}
-                  formatter={(value: any) => formatCurrency(Number(value))}
+                  contentStyle={{
+                    background: isDark ? '#0f172a' : '#ffffff',
+                    border: isDark ? '1px solid #334155' : '1px solid #e2e8f0',
+                    borderRadius: 12,
+                  }}
+                  formatter={(value: unknown) => formatCurrency(Number(value))}
                 />
                 <Bar dataKey="revenue" name="Ciro" fill="#22c55e" radius={[0, 6, 6, 0]} />
               </BarChart>
             </ResponsiveContainer>
           </div>
-          <div className="mt-2 space-y-1 text-xs text-slate-400">
+          <div className="mt-2 space-y-1 text-xs text-slate-600 dark:text-slate-400">
             {topProducts.map((p) => (
               <div key={p.id} className="flex justify-between">
-                <span className="font-mono">{p.sku}</span>
+                <span className="font-mono text-slate-800 dark:text-slate-200">{p.sku}</span>
                 <span>
-                  {formatNumber(p.quantity)} ad · %
-                  {((p.revenue / topProductsMaxRevenue) * 100).toFixed(0)}
+                  {formatNumber(p.quantity)} ad · %{((p.revenue / topProductsMaxRevenue) * 100).toFixed(0)}
                 </span>
               </div>
             ))}
           </div>
-        </div>
+        </GlobalCard>
       </div>
-    </div>
+    </PageLayout>
   )
 }
 
@@ -271,17 +263,24 @@ function Kpi({
   label: string
   value: string
   sub?: string
-  accent?: 'sky'
+  accent?: 'violet'
 }) {
   const cls =
-    accent === 'sky'
-      ? 'border-sky-500/30 bg-sky-500/10'
-      : 'border-slate-800 bg-slate-900/30'
+    accent === 'violet'
+      ? 'border-violet-200 bg-violet-50 dark:border-violet-500/25 dark:bg-violet-950/30'
+      : 'border-slate-200 bg-white dark:border-white/10 dark:bg-[#16122b]'
   return (
-    <div className={['rounded-2xl border p-5', cls].join(' ')}>
-      <div className="text-xs uppercase tracking-wide text-slate-400">{label}</div>
-      <div className="mt-1 text-2xl font-semibold text-slate-100">{value}</div>
-      {sub && <div className="mt-1 text-xs text-slate-400">{sub}</div>}
+    <div className={['rounded-2xl border p-5 shadow-sm dark:shadow-card-dark', cls].join(' ')}>
+      <div className="text-xs font-medium uppercase tracking-wide text-slate-500 dark:text-slate-400">{label}</div>
+      <div
+        className={[
+          'mt-1 text-2xl font-semibold',
+          accent === 'violet' ? 'text-violet-900 dark:text-violet-100' : 'text-slate-900 dark:text-slate-100',
+        ].join(' ')}
+      >
+        {value}
+      </div>
+      {sub ? <div className="mt-1 text-xs text-slate-600 dark:text-slate-400">{sub}</div> : null}
     </div>
   )
 }
@@ -294,12 +293,11 @@ function LabeledField({
   children: React.ReactNode
 }) {
   return (
-    <label className="flex flex-col gap-1">
-      <span className="text-[11px] uppercase tracking-wide text-slate-500">{label}</span>
+    <label className="flex min-w-[140px] flex-col gap-1">
+      <span className="text-[11px] font-medium uppercase tracking-wide text-slate-500 dark:text-slate-400">
+        {label}
+      </span>
       {children}
     </label>
   )
 }
-
-const inputCls =
-  'rounded-lg border border-slate-800 bg-slate-900/40 px-3 py-2 text-sm text-slate-100 placeholder:text-slate-500 outline-none focus:border-slate-600'

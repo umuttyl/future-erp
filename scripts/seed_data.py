@@ -107,7 +107,8 @@ PRODUCT_CATALOG: list[ProductSpec] = [
     ProductSpec("SKU-2401", "Demo USB-C Hub",           "Networking",   399.50,  180.00, 350, 35, 1.6),
     ProductSpec("SKU-2402", "Demo USB-C Dock 8-in-1",   "Networking",  1490.00,  720.00, 160, 18, 0.9),
     ProductSpec("SKU-2403", "Demo WiFi 6 Router",       "Networking",  2790.00, 1480.00,  90, 10, 0.5),
-    ProductSpec("SKU-2404", "Demo Mesh WiFi 3-pack",    "Networking",  5990.00, 3380.00,  40,  5, 0.3),
+    # Düşük stok: WS bildirimi + auto-draft demosu için kritik eşik altında başlangıç.
+    ProductSpec("SKU-2404", "Demo Mesh WiFi 3-pack",    "Networking",  5990.00, 3380.00,   8, 40, 0.3),
 
     # Accessories (6)
     ProductSpec("SKU-2501", "Demo Laptop Stand",        "Accessories",  349.00,  120.00, 450, 45, 1.4),

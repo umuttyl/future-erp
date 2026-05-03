@@ -34,6 +34,21 @@ export type AuthUserRow = {
   is_active: boolean
 }
 
+export type EmployeePerformanceRow = {
+  id: number
+  full_name: string
+  role: string
+  department: string | null
+  ai_score: number
+  ai_insight: string
+}
+
+/** GET /hr/employee-performance — admin / manager (hr.performance.read). */
+export async function fetchEmployeePerformance(): Promise<EmployeePerformanceRow[]> {
+  const { data } = await api.get<EmployeePerformanceRow[]>('/hr/employee-performance')
+  return data
+}
+
 let refreshChain: Promise<void> | null = null
 
 async function refreshAccessToken(): Promise<void> {
@@ -88,6 +103,13 @@ api.interceptors.response.use(
 /** FastAPI global handler ``{ error: { code, message } }``; legacy ``detail`` desteklenir. */
 export function getApiErrorMessage(error: unknown, fallback: string): string {
   if (axios.isAxiosError(error)) {
+    if (error.response == null) {
+      const code = error.code
+      if (code === 'ECONNREFUSED' || code === 'ERR_NETWORK' || error.message === 'Network Error') {
+        return 'Sunucuya bağlanılamadı. FastAPI http://127.0.0.1:8000 üzerinde çalışıyor mu ve Vite /api proxy hedefi aynı mı kontrol edin.'
+      }
+      if (code === 'ECONNABORTED') return 'İstek zaman aşımına uğradı.'
+    }
     const raw = error.response?.data as { error?: { message?: string }; detail?: unknown } | undefined
     if (raw?.error?.message != null) return String(raw.error.message)
     const detail = raw?.detail
@@ -165,6 +187,35 @@ export type StockMovement = {
   reference?: string | null
   note?: string | null
   created_at: string
+}
+
+export type AutoDraftSupplyOrder = {
+  id: number
+  product_id: number
+  quantity: number
+  status: string
+  created_at: string
+}
+
+export type AutoDraftSupplyResponse = {
+  message: string
+  order: AutoDraftSupplyOrder
+  stock_before: number
+  critical_threshold_used: number
+  target_stock: number
+  quantity_from_target_gap: number
+  prophet_demand_sum_30d: number | null
+}
+
+/** Actionable AI: kritik stokta taslak tedarik satırı oluşturur. `isAiOverride`: AI bildirimi — kritik kontrolü atlanır. */
+export async function postInventoryAutoDraft(
+  productId: number,
+  options?: { isAiOverride?: boolean },
+): Promise<AutoDraftSupplyResponse> {
+  const params =
+    options?.isAiOverride === true ? { is_ai_override: true } satisfies Record<string, boolean> : undefined
+  const { data } = await api.post<AutoDraftSupplyResponse>(`/inventory/${productId}/auto-draft`, null, { params })
+  return data
 }
 
 export type SalesItem = {

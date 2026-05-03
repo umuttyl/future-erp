@@ -126,6 +126,13 @@ npm run dev
 
 UI: http://localhost:5173
 
+## Canlı AI bildirimleri (geliştirme)
+
+- **WebSocket:** `GET` → `/api/ws/notifications?access_token=…` (JWT access; `ai.insights.read` izni). Vite proxy’de `/api` için WebSocket açık olmalı.
+- **Simülasyon:** `ENV != prod` iken arka planda anomali döngüsü; ürün başına **10 dk** tekrar engeli (cooldown).
+- **Frontend:** Topbar bildirim zili — liste, okunmamış rozeti, **Sustur** (toast kapatır; liste açık kalır), aynı anda en fazla **2** toast; bildirimden **Sipariş taslağı** → `POST /api/inventory/{id}/auto-draft?is_ai_override=true`.
+- **Stok derin bağlantı:** `/stock?productId={id}` ile ilgili satıra kaydırma.
+
 ## Test
 
 ### Backend — pytest

@@ -1,17 +1,35 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
+import { Loader2, Sparkles } from 'lucide-react'
+import { useSearchParams } from 'react-router-dom'
 
+import { AppToast } from '../components/ui/AppToast'
+import { GlobalCard, GlobalCardHeader } from '../components/ui/GlobalCard'
+import { PageLayout } from '../components/ui/PageLayout'
+import { useAuth } from '../context/AuthContext'
+import {
+  ghostButtonClass,
+  inputFieldClass,
+  primaryButtonClass,
+  secondaryButtonClass,
+  selectFieldClass,
+  tableCellClass,
+  tableHeaderClass,
+  tableRowHoverClass,
+} from '../components/ui/forms'
 import {
   api,
   formatCurrency,
   formatDate,
   formatNumber,
   getApiErrorMessage,
+  postInventoryAutoDraft,
   type Product,
   type ProductCreate,
   type ProductUpdate,
   type StockAdjustRequest,
   type StockMovement,
 } from '../lib/api'
+import { isProductStockCriticallyLow } from '../lib/stockCritical'
 
 type ProductForm = {
   sku: string
@@ -47,7 +65,13 @@ const emptyAdjust: StockAdjustForm = {
   note: '',
 }
 
+const PERM_STOCK_ADJUST = 'stock.adjust'
+
 export function StockPage() {
+  const { hasPermission } = useAuth()
+  const canAutoDraft = hasPermission(PERM_STOCK_ADJUST)
+  const [searchParams] = useSearchParams()
+
   const [products, setProducts] = useState<Product[]>([])
   const [movements, setMovements] = useState<StockMovement[]>([])
   const [loading, setLoading] = useState(true)
@@ -59,6 +83,10 @@ export function StockPage() {
   const [showForm, setShowForm] = useState(false)
   const [adjust, setAdjust] = useState<StockAdjustForm>(emptyAdjust)
   const [busy, setBusy] = useState(false)
+  const [draftingProductId, setDraftingProductId] = useState<number | null>(null)
+  const [toast, setToast] = useState<{ variant: 'success' | 'error'; message: string } | null>(null)
+
+  const dismissToast = useCallback(() => setToast(null), [])
 
   async function load() {
     try {
@@ -70,7 +98,7 @@ export function StockPage() {
       ])
       setProducts(pr.data)
       setMovements(mv.data)
-    } catch (e: any) {
+    } catch (e: unknown) {
       setError(getApiErrorMessage(e, 'Yükleme başarısız'))
     } finally {
       setLoading(false)
@@ -78,13 +106,31 @@ export function StockPage() {
   }
 
   useEffect(() => {
-    load()
+    void load()
   }, [])
 
+  const highlightProductId = useMemo(() => {
+    const raw = searchParams.get('productId')
+    if (!raw) return null
+    const n = Number(raw)
+    return Number.isFinite(n) && n > 0 ? n : null
+  }, [searchParams])
+
+  useEffect(() => {
+    if (highlightProductId == null || loading) return
+    const t = window.setTimeout(() => {
+      document.getElementById(`stock-product-row-${highlightProductId}`)?.scrollIntoView({
+        behavior: 'smooth',
+        block: 'center',
+      })
+    }, 120)
+    return () => window.clearTimeout(t)
+  }, [highlightProductId, loading, products.length])
+
   const categories = useMemo(() => {
-    const set = new Set<string>()
-    for (const p of products) if (p.category) set.add(p.category)
-    return Array.from(set).sort()
+    const s = new Set<string>()
+    for (const p of products) if (p.category) s.add(p.category)
+    return Array.from(s).sort()
   }, [products])
 
   const filtered = useMemo(() => {
@@ -108,7 +154,7 @@ export function StockPage() {
       const price = Number(p.unit_price)
       invValue += (p.stock_quantity || 0) * (Number.isFinite(price) ? price : 0)
       units += p.stock_quantity || 0
-      if (p.reorder_level > 0 && p.stock_quantity <= p.reorder_level) lowStock += 1
+      if (isProductStockCriticallyLow(p)) lowStock += 1
     }
     return { invValue, units, lowStock, skuCount: products.length }
   }, [products])
@@ -161,7 +207,7 @@ export function StockPage() {
       }
       setShowForm(false)
       await load()
-    } catch (e: any) {
+    } catch (e: unknown) {
       setError(getApiErrorMessage(e, 'Kaydedilemedi'))
     } finally {
       setBusy(false)
@@ -175,7 +221,7 @@ export function StockPage() {
     try {
       await api.delete(`/products/${p.id}`)
       await load()
-    } catch (e: any) {
+    } catch (e: unknown) {
       setError(getApiErrorMessage(e, 'Silinemedi'))
     } finally {
       setBusy(false)
@@ -191,8 +237,8 @@ export function StockPage() {
         adjust.movement_type === 'out'
           ? -Math.abs(Number(adjust.change))
           : adjust.movement_type === 'in'
-          ? Math.abs(Number(adjust.change))
-          : Number(adjust.change)
+            ? Math.abs(Number(adjust.change))
+            : Number(adjust.change)
 
       const payload: StockAdjustRequest = {
         change: delta,
@@ -203,31 +249,48 @@ export function StockPage() {
       await api.post(`/products/${adjust.productId}/stock`, payload)
       setAdjust(emptyAdjust)
       await load()
-    } catch (e: any) {
+    } catch (e: unknown) {
       setError(getApiErrorMessage(e, 'Stok güncellenemedi'))
     } finally {
       setBusy(false)
     }
   }
 
+  async function createAutoDraftSupply(p: Product) {
+    if (draftingProductId != null) return
+    setDraftingProductId(p.id)
+    dismissToast()
+    try {
+      const res = await postInventoryAutoDraft(p.id)
+      const qty = res.order.quantity
+      setToast({
+        variant: 'success',
+        message: `Tedarikçiye ${formatNumber(qty)} adet sipariş taslağı AI tarafından oluşturuldu`,
+      })
+    } catch (e: unknown) {
+      setToast({
+        variant: 'error',
+        message: getApiErrorMessage(e, 'Taslak oluşturulamadı'),
+      })
+    } finally {
+      setDraftingProductId(null)
+    }
+  }
+
   return (
-    <div className="space-y-6">
-      <div className="flex items-end justify-between gap-4">
-        <div>
-          <div className="text-2xl font-semibold text-slate-100">Stok & Ürün Yönetimi</div>
-          <div className="mt-1 text-sm text-slate-400">
-            Ürünleri, fiyatları ve stok seviyelerini buradan yönetin.
-          </div>
-        </div>
-        <button onClick={openCreate} className="rounded-xl bg-sky-500 px-4 py-2 text-sm font-semibold text-slate-950 hover:bg-sky-400">
+    <PageLayout
+      title="Stok & Ürün Yönetimi"
+      subtitle="Ürünleri, fiyatları ve stok seviyelerini buradan yönetin."
+      actions={
+        <button type="button" onClick={openCreate} className={primaryButtonClass}>
           + Yeni Ürün
         </button>
-      </div>
-
-      <div className="grid grid-cols-1 gap-3 md:grid-cols-4">
+      }
+    >
+      <div className="grid grid-cols-1 gap-4 md:grid-cols-4">
         <Kpi label="SKU Sayısı" value={formatNumber(kpis.skuCount)} />
         <Kpi label="Toplam Adet" value={formatNumber(kpis.units)} />
-        <Kpi label="Envanter Değeri" value={formatCurrency(kpis.invValue)} accent="sky" />
+        <Kpi label="Envanter Değeri" value={formatCurrency(kpis.invValue)} accent="violet" />
         <Kpi
           label="Kritik Stok"
           value={formatNumber(kpis.lowStock)}
@@ -235,21 +298,21 @@ export function StockPage() {
         />
       </div>
 
-      <div className="rounded-2xl border border-slate-800 bg-slate-900/30 p-4">
+      <GlobalCard>
         <div className="flex flex-wrap items-end gap-3">
           <LabeledField label="Ara (SKU/ad)">
             <input
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               placeholder="mouse, SKU-2001..."
-              className={inputCls}
+              className={inputFieldClass + ' min-w-[200px]'}
             />
           </LabeledField>
           <LabeledField label="Kategori">
             <select
               value={filterCat}
               onChange={(e) => setFilterCat(e.target.value)}
-              className={inputCls}
+              className={selectFieldClass + ' min-w-[160px]'}
             >
               <option value="">Tümü</option>
               {categories.map((c) => (
@@ -260,17 +323,18 @@ export function StockPage() {
             </select>
           </LabeledField>
         </div>
-      </div>
+      </GlobalCard>
 
-      <div className="rounded-2xl border border-slate-800 bg-slate-900/30">
-        <div className="flex items-center justify-between border-b border-slate-800 px-4 py-3 text-sm text-slate-400">
-          <div>{loading ? 'Yükleniyor…' : `${filtered.length} ürün`}</div>
-          {error && <div className="text-rose-300">Hata: {error}</div>}
-        </div>
-        <div className="overflow-x-auto">
+      <GlobalCard>
+        <GlobalCardHeader
+          title="Ürünler"
+          description={loading ? 'Yükleniyor…' : `${filtered.length} ürün`}
+          right={error ? <span className="text-sm text-rose-600 dark:text-rose-300">Hata: {error}</span> : null}
+        />
+        <div className="-mx-5 overflow-x-auto border-t border-slate-100 dark:border-white/5">
           <table className="min-w-full text-sm">
             <thead>
-              <tr className="text-left text-xs uppercase tracking-wide text-slate-500">
+              <tr className={tableHeaderClass}>
                 <th className="px-4 py-3">SKU</th>
                 <th className="px-4 py-3">Ürün</th>
                 <th className="px-4 py-3">Kategori</th>
@@ -278,41 +342,75 @@ export function StockPage() {
                 <th className="px-4 py-3 text-right">Maliyet</th>
                 <th className="px-4 py-3 text-right">Stok</th>
                 <th className="px-4 py-3 text-right">Eşik</th>
-                <th className="px-4 py-3" />
+                <th className="px-4 py-3 text-right text-xs font-semibold normal-case tracking-normal">İşlemler</th>
               </tr>
             </thead>
             <tbody>
               {filtered.map((p) => {
-                const low = p.reorder_level > 0 && p.stock_quantity <= p.reorder_level
+                const critical = isProductStockCriticallyLow(p)
+                const rowHi = highlightProductId === p.id
                 return (
-                  <tr key={p.id} className="border-t border-slate-800/60 hover:bg-slate-900/40">
-                    <td className="px-4 py-3 font-mono text-slate-200">{p.sku}</td>
-                    <td className="px-4 py-3 text-slate-100">{p.name}</td>
-                    <td className="px-4 py-3 text-slate-300">{p.category ?? '—'}</td>
-                    <td className="px-4 py-3 text-right text-slate-200">
-                      {formatCurrency(p.unit_price)}
-                    </td>
-                    <td className="px-4 py-3 text-right text-slate-400">
+                  <tr
+                    key={p.id}
+                    id={`stock-product-row-${p.id}`}
+                    className={[
+                      tableRowHoverClass,
+                      rowHi
+                        ? 'bg-violet-50/80 ring-2 ring-inset ring-violet-400/70 dark:bg-violet-950/35 dark:ring-violet-500/50'
+                        : '',
+                    ]
+                      .filter(Boolean)
+                      .join(' ')}
+                  >
+                    <td className={`px-4 py-3 font-mono ${tableCellClass}`}>{p.sku}</td>
+                    <td className={`px-4 py-3 font-medium text-slate-900 dark:text-slate-100`}>{p.name}</td>
+                    <td className={`px-4 py-3 ${tableCellClass}`}>{p.category ?? '—'}</td>
+                    <td className={`px-4 py-3 text-right ${tableCellClass}`}>{formatCurrency(p.unit_price)}</td>
+                    <td className={`px-4 py-3 text-right text-slate-500 dark:text-slate-400`}>
                       {formatCurrency(p.cost_price)}
                     </td>
                     <td className="px-4 py-3 text-right">
                       <span
                         className={[
-                          'rounded-md px-2 py-0.5 text-xs font-semibold',
-                          low
-                            ? 'bg-rose-500/15 text-rose-300 border border-rose-500/30'
-                            : 'bg-emerald-500/10 text-emerald-300 border border-emerald-500/20',
+                          'rounded-md border px-2 py-0.5 text-xs font-semibold',
+                          critical
+                            ? 'border-rose-200 bg-rose-50 text-rose-800 dark:border-rose-500/30 dark:bg-rose-950/40 dark:text-rose-200'
+                            : 'border-emerald-200 bg-emerald-50 text-emerald-900 dark:border-emerald-500/25 dark:bg-emerald-950/40 dark:text-emerald-200',
                         ].join(' ')}
                       >
                         {formatNumber(p.stock_quantity)}
                       </span>
                     </td>
-                    <td className="px-4 py-3 text-right text-slate-400">
+                    <td className={`px-4 py-3 text-right text-slate-500 dark:text-slate-400`}>
                       {formatNumber(p.reorder_level)}
                     </td>
                     <td className="px-4 py-3">
-                      <div className="flex items-center justify-end gap-2">
+                      <div className="flex flex-wrap items-center justify-end gap-2">
+                        {critical && canAutoDraft ? (
+                          <button
+                            type="button"
+                            disabled={draftingProductId != null}
+                            onClick={() => void createAutoDraftSupply(p)}
+                            title="AI ile tedarikçiye taslak sipariş oluştur"
+                            className={[
+                              'inline-flex items-center gap-1.5 rounded-full border border-violet-400/60 bg-gradient-to-r from-violet-600 to-indigo-600 px-3 py-1.5 text-xs font-semibold text-white shadow-lg shadow-violet-500/40',
+                              'ring-2 ring-violet-400/40 transition hover:opacity-[0.97] hover:shadow-violet-500/55 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-violet-500',
+                              'disabled:pointer-events-none disabled:opacity-60',
+                              'motion-safe:animate-pulse motion-reduce:animate-none',
+                            ].join(' ')}
+                          >
+                            {draftingProductId === p.id ? (
+                              <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin" aria-hidden />
+                            ) : (
+                              <Sparkles className="h-3.5 w-3.5 shrink-0" aria-hidden />
+                            )}
+                            <span className="max-w-[10rem] truncate sm:max-w-[14rem]">
+                              {draftingProductId === p.id ? 'Oluşturuluyor…' : 'Sipariş taslağı oluştur'}
+                            </span>
+                          </button>
+                        ) : null}
                         <button
+                          type="button"
                           onClick={() =>
                             setAdjust({
                               ...emptyAdjust,
@@ -320,19 +418,20 @@ export function StockPage() {
                               movement_type: 'in',
                             })
                           }
-                          className="rounded-lg border border-slate-700 px-2 py-1 text-xs text-slate-200 hover:bg-slate-800"
+                          className={ghostButtonClass + ' text-xs'}
                         >
                           Stok+/-
                         </button>
-                        <button
-                          onClick={() => openEdit(p)}
-                          className="rounded-lg border border-slate-700 px-2 py-1 text-xs text-slate-200 hover:bg-slate-800"
-                        >
+                        <button type="button" onClick={() => openEdit(p)} className={ghostButtonClass + ' text-xs'}>
                           Düzenle
                         </button>
                         <button
-                          onClick={() => deleteProduct(p)}
-                          className="rounded-lg border border-rose-700/50 px-2 py-1 text-xs text-rose-300 hover:bg-rose-500/10"
+                          type="button"
+                          onClick={() => void deleteProduct(p)}
+                          className={
+                            ghostButtonClass +
+                            ' border-rose-200 text-rose-700 hover:bg-rose-50 dark:border-rose-500/30 dark:text-rose-300 dark:hover:bg-rose-950/30 text-xs'
+                          }
                         >
                           Sil
                         </button>
@@ -343,7 +442,7 @@ export function StockPage() {
               })}
               {!loading && filtered.length === 0 && (
                 <tr>
-                  <td colSpan={8} className="px-4 py-10 text-center text-sm text-slate-400">
+                  <td colSpan={8} className="px-4 py-10 text-center text-sm text-slate-500 dark:text-slate-400">
                     Ürün bulunamadı.
                   </td>
                 </tr>
@@ -351,16 +450,14 @@ export function StockPage() {
             </tbody>
           </table>
         </div>
-      </div>
+      </GlobalCard>
 
-      <div className="rounded-2xl border border-slate-800 bg-slate-900/30">
-        <div className="border-b border-slate-800 px-4 py-3 text-sm font-semibold text-slate-200">
-          Son Stok Hareketleri
-        </div>
-        <div className="overflow-x-auto">
+      <GlobalCard>
+        <GlobalCardHeader title="Son stok hareketleri" description="Son 30 kayıt" />
+        <div className="-mx-5 overflow-x-auto border-t border-slate-100 dark:border-white/5">
           <table className="min-w-full text-sm">
             <thead>
-              <tr className="text-left text-xs uppercase tracking-wide text-slate-500">
+              <tr className={tableHeaderClass}>
                 <th className="px-4 py-3">Zaman</th>
                 <th className="px-4 py-3">Ürün</th>
                 <th className="px-4 py-3">Tip</th>
@@ -371,23 +468,23 @@ export function StockPage() {
             </thead>
             <tbody>
               {movements.map((m) => {
-                const p = products.find((x) => x.id === m.product_id)
+                const pr = products.find((x) => x.id === m.product_id)
                 const isIn = m.change > 0
                 return (
-                  <tr key={m.id} className="border-t border-slate-800/60">
-                    <td className="px-4 py-2 text-slate-400">{formatDate(m.created_at)}</td>
-                    <td className="px-4 py-2 text-slate-200">
-                      {p ? `${p.sku} · ${p.name}` : `#${m.product_id}`}
+                  <tr key={m.id} className={tableRowHoverClass}>
+                    <td className="px-4 py-2 text-slate-500 dark:text-slate-400">{formatDate(m.created_at)}</td>
+                    <td className={`px-4 py-2 ${tableCellClass}`}>
+                      {pr ? `${pr.sku} · ${pr.name}` : `#${m.product_id}`}
                     </td>
                     <td className="px-4 py-2">
                       <span
                         className={[
-                          'rounded-md px-2 py-0.5 text-xs uppercase',
+                          'rounded-md px-2 py-0.5 text-xs font-medium uppercase',
                           m.movement_type === 'in'
-                            ? 'bg-emerald-500/10 text-emerald-300'
+                            ? 'bg-emerald-50 text-emerald-900 dark:bg-emerald-950/40 dark:text-emerald-200'
                             : m.movement_type === 'out'
-                            ? 'bg-rose-500/10 text-rose-300'
-                            : 'bg-slate-700/30 text-slate-200',
+                              ? 'bg-rose-50 text-rose-900 dark:bg-rose-950/40 dark:text-rose-200'
+                              : 'bg-slate-100 text-slate-800 dark:bg-white/10 dark:text-slate-200',
                         ].join(' ')}
                       >
                         {m.movement_type}
@@ -395,45 +492,45 @@ export function StockPage() {
                     </td>
                     <td
                       className={[
-                        'px-4 py-2 text-right font-mono',
-                        isIn ? 'text-emerald-300' : 'text-rose-300',
+                        'px-4 py-2 text-right font-mono font-medium',
+                        isIn ? 'text-emerald-700 dark:text-emerald-300' : 'text-rose-700 dark:text-rose-300',
                       ].join(' ')}
                     >
                       {isIn ? '+' : ''}
                       {m.change}
                     </td>
-                    <td className="px-4 py-2 text-right text-slate-300">{m.balance_after}</td>
-                    <td className="px-4 py-2 text-slate-400">{m.reference ?? '—'}</td>
+                    <td className={`px-4 py-2 text-right ${tableCellClass}`}>{m.balance_after}</td>
+                    <td className="px-4 py-2 text-slate-500 dark:text-slate-400">{m.reference ?? '—'}</td>
                   </tr>
                 )
               })}
             </tbody>
           </table>
         </div>
-      </div>
+      </GlobalCard>
 
-      {showForm && (
+      {showForm ? (
         <Modal title={editing ? 'Ürün Düzenle' : 'Yeni Ürün'} onClose={() => setShowForm(false)}>
           <div className="grid grid-cols-2 gap-3">
             <LabeledField label="SKU">
               <input
                 value={form.sku}
                 onChange={(e) => setForm({ ...form, sku: e.target.value })}
-                className={inputCls}
+                className={inputFieldClass}
               />
             </LabeledField>
             <LabeledField label="Kategori">
               <input
                 value={form.category}
                 onChange={(e) => setForm({ ...form, category: e.target.value })}
-                className={inputCls}
+                className={inputFieldClass}
               />
             </LabeledField>
             <LabeledField label="Ürün Adı" className="col-span-2">
               <input
                 value={form.name}
                 onChange={(e) => setForm({ ...form, name: e.target.value })}
-                className={inputCls}
+                className={inputFieldClass}
               />
             </LabeledField>
             <LabeledField label="Birim Fiyat">
@@ -442,7 +539,7 @@ export function StockPage() {
                 step="0.01"
                 value={form.unit_price}
                 onChange={(e) => setForm({ ...form, unit_price: e.target.value })}
-                className={inputCls}
+                className={inputFieldClass}
               />
             </LabeledField>
             <LabeledField label="Maliyet">
@@ -451,47 +548,44 @@ export function StockPage() {
                 step="0.01"
                 value={form.cost_price}
                 onChange={(e) => setForm({ ...form, cost_price: e.target.value })}
-                className={inputCls}
+                className={inputFieldClass}
               />
             </LabeledField>
-            {!editing && (
+            {!editing ? (
               <LabeledField label="Başlangıç Stoğu">
                 <input
                   type="number"
                   min="0"
                   value={form.stock_quantity}
                   onChange={(e) => setForm({ ...form, stock_quantity: e.target.value })}
-                  className={inputCls}
+                  className={inputFieldClass}
                 />
               </LabeledField>
-            )}
+            ) : null}
             <LabeledField label="Kritik Eşik">
               <input
                 type="number"
                 min="0"
                 value={form.reorder_level}
                 onChange={(e) => setForm({ ...form, reorder_level: e.target.value })}
-                className={inputCls}
+                className={inputFieldClass}
               />
             </LabeledField>
           </div>
 
           <div className="mt-4 flex items-center justify-end gap-2">
-            <button onClick={() => setShowForm(false)} className={ghostBtn}>
+            <button type="button" onClick={() => setShowForm(false)} className={secondaryButtonClass}>
               İptal
             </button>
-            <button disabled={busy} onClick={saveProduct} className={primaryBtn}>
+            <button type="button" disabled={busy} onClick={() => void saveProduct()} className={primaryButtonClass}>
               {busy ? 'Kaydediliyor…' : 'Kaydet'}
             </button>
           </div>
         </Modal>
-      )}
+      ) : null}
 
-      {adjust.productId != null && (
-        <Modal
-          title={`Stok Hareketi · #${adjust.productId}`}
-          onClose={() => setAdjust(emptyAdjust)}
-        >
+      {adjust.productId != null ? (
+        <Modal title={`Stok Hareketi · #${adjust.productId}`} onClose={() => setAdjust(emptyAdjust)}>
           <div className="grid grid-cols-2 gap-3">
             <LabeledField label="Hareket Tipi">
               <select
@@ -502,7 +596,7 @@ export function StockPage() {
                     movement_type: e.target.value as 'in' | 'out' | 'adjust',
                   })
                 }
-                className={inputCls}
+                className={selectFieldClass}
               >
                 <option value="in">Giriş (in)</option>
                 <option value="out">Çıkış (out)</option>
@@ -515,7 +609,7 @@ export function StockPage() {
                 value={adjust.change}
                 onChange={(e) => setAdjust({ ...adjust, change: e.target.value })}
                 placeholder="10"
-                className={inputCls}
+                className={inputFieldClass}
               />
             </LabeledField>
             <LabeledField label="Not" className="col-span-2">
@@ -523,21 +617,25 @@ export function StockPage() {
                 value={adjust.note}
                 onChange={(e) => setAdjust({ ...adjust, note: e.target.value })}
                 placeholder="Sayım farkı, sevkiyat, vs."
-                className={inputCls}
+                className={inputFieldClass}
               />
             </LabeledField>
           </div>
           <div className="mt-4 flex items-center justify-end gap-2">
-            <button onClick={() => setAdjust(emptyAdjust)} className={ghostBtn}>
+            <button type="button" onClick={() => setAdjust(emptyAdjust)} className={secondaryButtonClass}>
               İptal
             </button>
-            <button disabled={busy} onClick={submitAdjust} className={primaryBtn}>
+            <button type="button" disabled={busy} onClick={() => void submitAdjust()} className={primaryButtonClass}>
               {busy ? 'İşleniyor…' : 'Kaydet'}
             </button>
           </div>
         </Modal>
-      )}
-    </div>
+      ) : null}
+
+      {toast ? (
+        <AppToast message={toast.message} variant={toast.variant} onDismiss={dismissToast} />
+      ) : null}
+    </PageLayout>
   )
 }
 
@@ -548,18 +646,34 @@ function Kpi({
 }: {
   label: string
   value: string
-  accent?: 'sky' | 'rose'
+  accent?: 'violet' | 'rose'
 }) {
   const accentCls =
-    accent === 'sky'
-      ? 'border-sky-500/30 bg-sky-500/10 text-sky-100'
+    accent === 'violet'
+      ? 'border-violet-200 bg-violet-50 dark:border-violet-500/25 dark:bg-violet-950/30'
       : accent === 'rose'
-      ? 'border-rose-500/30 bg-rose-500/10 text-rose-100'
-      : 'border-slate-800 bg-slate-900/30 text-slate-100'
+        ? 'border-rose-200 bg-rose-50 dark:border-rose-500/25 dark:bg-rose-950/30'
+        : 'border-slate-200 bg-white dark:border-white/10 dark:bg-[#16122b]'
   return (
-    <div className={['rounded-2xl border p-4', accentCls].join(' ')}>
-      <div className="text-xs uppercase tracking-wide text-slate-400">{label}</div>
-      <div className="mt-1 text-2xl font-semibold">{value}</div>
+    <div
+      className={[
+        'rounded-2xl border p-4 shadow-sm dark:shadow-card-dark',
+        accentCls,
+      ].join(' ')}
+    >
+      <div className="text-xs font-medium uppercase tracking-wide text-slate-500 dark:text-slate-400">{label}</div>
+      <div
+        className={[
+          'mt-1 text-2xl font-semibold',
+          accent === 'violet'
+            ? 'text-violet-900 dark:text-violet-100'
+            : accent === 'rose'
+              ? 'text-rose-900 dark:text-rose-100'
+              : 'text-slate-900 dark:text-slate-100',
+        ].join(' ')}
+      >
+        {value}
+      </div>
     </div>
   )
 }
@@ -575,7 +689,9 @@ function LabeledField({
 }) {
   return (
     <label className={['flex flex-col gap-1', className].filter(Boolean).join(' ')}>
-      <span className="text-[11px] uppercase tracking-wide text-slate-500">{label}</span>
+      <span className="text-[11px] font-medium uppercase tracking-wide text-slate-500 dark:text-slate-400">
+        {label}
+      </span>
       {children}
     </label>
   )
@@ -592,18 +708,22 @@ function Modal({
 }) {
   return (
     <div
-      className="fixed inset-0 z-40 flex items-center justify-center bg-slate-950/70 p-4"
+      className="fixed inset-0 z-40 flex items-center justify-center bg-slate-900/50 p-4 dark:bg-slate-950/70"
       onClick={onClose}
+      role="presentation"
     >
       <div
         onClick={(e) => e.stopPropagation()}
-        className="w-full max-w-xl overflow-hidden rounded-2xl border border-slate-800 bg-slate-950 shadow-2xl"
+        role="dialog"
+        aria-modal="true"
+        className="w-full max-w-xl overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl dark:border-white/10 dark:bg-[#16122b]"
       >
-        <div className="flex items-center justify-between border-b border-slate-800 px-5 py-4">
-          <div className="text-sm font-semibold text-slate-100">{title}</div>
+        <div className="flex items-center justify-between border-b border-slate-200 px-5 py-4 dark:border-white/10">
+          <div className="text-sm font-semibold text-slate-900 dark:text-slate-100">{title}</div>
           <button
+            type="button"
             onClick={onClose}
-            className="rounded-lg px-2 py-1 text-sm text-slate-300 hover:bg-slate-900"
+            className="rounded-lg px-2 py-1 text-sm text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-white/10"
           >
             Kapat
           </button>
@@ -613,12 +733,3 @@ function Modal({
     </div>
   )
 }
-
-const inputCls =
-  'rounded-lg border border-slate-800 bg-slate-900/40 px-3 py-2 text-sm text-slate-100 placeholder:text-slate-500 outline-none focus:border-slate-600'
-
-const primaryBtn =
-  'rounded-lg bg-sky-500 px-4 py-2 text-sm font-semibold text-slate-950 hover:bg-sky-400 disabled:opacity-50'
-
-const ghostBtn =
-  'rounded-lg border border-slate-800 px-4 py-2 text-sm text-slate-200 hover:bg-slate-900'
