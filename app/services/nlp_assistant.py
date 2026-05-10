@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import re
 from dataclasses import dataclass
 from datetime import date, datetime
@@ -16,6 +17,11 @@ from sqlalchemy.orm import Session
 
 from app.core.config import settings
 
+logger = logging.getLogger(__name__)
+
+NLP_FRIENDLY_DB_FAILURE = (
+    "Üzgünüm, bu isteğinizi veritabanından çekemedim. Daha farklı bir şekilde sorabilir misiniz?"
+)
 
 ALLOWED_TABLES = {
     "products",
@@ -45,73 +51,67 @@ class NlpAnswer:
     chart_hint: Optional[Dict[str, Any]] = None
 
 
-def _schema_prompt() -> str:
-    return """You are an expert data analyst.
+@dataclass
+class ChatOnlyReply:
+    """LLM yanıtı yalnızca doğal dil; veritabanı sorgusu yok."""
 
-Task: Convert Turkish natural language into a single SQL SELECT query for the given schema.
+    message: str
 
-Schema (PostgreSQL compatible, but must also work on SQLite when possible):
+
+def _unified_nlp_system_prompt() -> str:
+    return """You are the Future ERP AI assistant (Sen Future ERP AI asistanısın).
+
+CRITICAL: If the user is ONLY greeting or chatting (e.g. "Merhaba", "Nasılsın", "Ne yapabilirsin?", "Teşekkürler"),
+you MUST NOT produce SQL. Reply in Turkish in a warm, natural, friendly way (reply_type "chat").
+
+ONLY when the user clearly asks for specific data or a report (e.g. "En çok satan ürünler", "Son 30 gün ciro")
+should you use reply_type "sql" with one safe SELECT.
+
+FIRST decide whether the user needs LIVE DATA from the tenant database or a CONVERSATIONAL answer only.
+
+Use reply_type "chat" (no SQL) when:
+- Greetings, thanks, small talk ("merhaba", "teşekkürler").
+- Conceptual or general questions that do NOT require querying tables (e.g. "talep tahmini nedir", "bu modül ne işe yarar", "nasıl çalışır", definitions, methodology).
+- Advice or help text where specific row counts or lists from the DB are not requested.
+
+Use reply_type "sql" ONLY when the user clearly wants factual rows or aggregates from the database:
+lists, counts, sums, rankings, "top N", filters by date/SKU/customer, stock below threshold, etc.
+
+Output EXACTLY one JSON object (no markdown fences, no prose outside JSON):
+
+Chat-only:
+{ "reply_type": "chat", "message": "<answer in Turkish, clear and concise>" }
+
+Database query:
+{ "reply_type": "sql", "sql": "<single SELECT>", "params": { } }
+
+Schema (PostgreSQL compatible; SQLite-friendly when possible):
 
 Table: products
-  - id (int, pk)
-  - tenant_id (int, fk) — ZORUNLU filtre
-  - sku (varchar)
-  - name (varchar)
-  - category (varchar, nullable)
-  - unit_price (numeric)
-  - cost_price (numeric)
-  - stock_quantity (int)
-  - reorder_level (int)
+  - id, tenant_id (int, fk) — REQUIRED filter tenant_id = :tid
+  - sku, name, category, unit_price, cost_price, stock_quantity, reorder_level
 
 Table: sales_records
-  - id (int, pk)
-  - tenant_id (int, fk) — ZORUNLU filtre
-  - record_no (varchar)
-  - sale_date (date)
-  - customer_name (varchar, nullable)
-  - total_amount (numeric)
+  - id, tenant_id, record_no, sale_date, customer_name, total_amount
 
 Table: sales_items
-  - id (int, pk)
-  - tenant_id (int, fk) — ZORUNLU filtre
-  - sales_record_id (int, fk -> sales_records.id)
-  - product_id (int, fk -> products.id)
-  - quantity (int)
-  - unit_price (numeric)
-  - line_total (numeric)
+  - id, tenant_id, sales_record_id, product_id, quantity, unit_price, line_total
 
 Table: sales_forecast_results
-  - id (int, pk)
-  - tenant_id (int, fk) — ZORUNLU filtre
-  - model_name (varchar)
-  - scope (varchar)
-  - product_id (int, nullable)
-  - forecast_start (date)
-  - horizon_days (int)
-  - result_payload (json)
-  - created_at (datetime)
+  - id, tenant_id, model_name, scope, product_id, forecast_start, horizon_days, result_payload, created_at
 
 Table: stock_movements
-  - id (int, pk)
-  - tenant_id (int, fk) — ZORUNLU filtre
-  - product_id (int, fk -> products.id)
-  - movement_type (varchar: 'in' | 'out' | 'adjust')
-  - change (int)
-  - balance_after (int)
-  - reference (varchar, nullable)
-  - note (varchar, nullable)
-  - created_at (datetime)
+  - id, tenant_id, product_id, movement_type ('in'|'out'|'adjust'), change, balance_after, reference, note, created_at
 
-Rules:
-- Output MUST be valid JSON with keys: sql, params
-- sql MUST be a single SELECT statement (no INSERT/UPDATE/DELETE/DDL, no multiple statements)
-- Use only the allowed tables: products, sales_records, sales_items, sales_forecast_results, stock_movements
-- Never use '*' (select explicit columns)
-- Her sorguda her kullanılan tablo için tenant_id = :tid koşulunu WHERE içinde ver (bind :tid).
-- Use named parameters like :limit, :start_date, :end_date, :product_id when needed
-- If user asks "en yüksek kâr" but no cost data exists, interpret as "en yüksek ciro" (sum line_total)
-- Default limit to 5 when user asks top N and N not specified
-- Prefer human-friendly column aliases in Turkish when possible (e.g. "urun_adi", "toplam_ciro", "stok")
+SQL rules (only when reply_type is "sql"):
+- sql MUST be a single SELECT (no INSERT/UPDATE/DELETE/DDL, no multiple statements)
+- Allowed tables only: products, sales_records, sales_items, sales_forecast_results, stock_movements
+- Never use SELECT * (explicit columns)
+- Every referenced table MUST be filtered with tenant_id = :tid (bind :tid)
+- Named parameters :limit, :start_date, :end_date, :product_id as needed
+- If "en yüksek kâr" but cost unclear, interpret as revenue (line_total / total_amount)
+- Default LIMIT 5 when user asks "top" without N
+- Prefer Turkish-friendly column aliases (urun_adi, toplam_ciro, stok)
 """
 
 
@@ -129,7 +129,7 @@ def _summary_prompt(user_text: str, sql: str, data: List[Dict[str, Any]]) -> str
         "- Eğer veri tablosu/satır yoksa bunu nazikçe belirt.\n"
         "- 'chart_hint' en uygun grafik önerisidir. İki kolon varsa kategori/metrik çifti "
         'bar/pie verir. Zaman kolonu (date/month) varsa "line". Uygun değilse "none".\n'
-        '- Asla SQL\'i tekrarlama, sonuçları tablo olarak tekrar dökme.\n\n'
+        "- Asla SQL'i tekrarlama, sonuçları tablo olarak tekrar dökme.\n\n"
         f"Kullanıcı sorusu:\n{user_text}\n\n"
         f"Üretilen SQL:\n{sql}\n\n"
         f"Sonuç verisi (ilk {len(trimmed)} satır):\n{json.dumps(trimmed, default=_json_default, ensure_ascii=False)}"
@@ -184,9 +184,20 @@ def _validate_sql(sql: str) -> None:
         raise UnsafeSQL("Only SELECT queries are allowed.")
 
     bad_keywords = [
-        "INSERT", "UPDATE", "DELETE", "DROP", "ALTER", "TRUNCATE",
-        "CREATE", "GRANT", "REVOKE", "COPY", "VACUUM", "ATTACH",
-        "DETACH", "PRAGMA",
+        "INSERT",
+        "UPDATE",
+        "DELETE",
+        "DROP",
+        "ALTER",
+        "TRUNCATE",
+        "CREATE",
+        "GRANT",
+        "REVOKE",
+        "COPY",
+        "VACUUM",
+        "ATTACH",
+        "DETACH",
+        "PRAGMA",
     ]
     up = raw.upper()
     if any(k in up for k in bad_keywords):
@@ -228,15 +239,21 @@ def _generate_content(system_prompt: str, user_prompt: Optional[str] = None) -> 
         return resp.choices[0].message.content or ""
 
     if not settings.GEMINI_API_KEY:
-        raise RuntimeError("Set OPENAI_API_KEY or GEMINI_API_KEY in .env to enable NLP assistant.")
+        raise RuntimeError(
+            "Set OPENAI_API_KEY or GEMINI_API_KEY in .env to enable NLP assistant."
+        )
 
     client = _gemini_client()
-    tried = [settings.GEMINI_MODEL] + [m for m in _CANDIDATE_MODELS if m != settings.GEMINI_MODEL]
+    tried = [settings.GEMINI_MODEL] + [
+        m for m in _CANDIDATE_MODELS if m != settings.GEMINI_MODEL
+    ]
     last_err: Exception | None = None
     content = ""
     for model_name in tried:
         try:
-            parts = [system_prompt] if user_prompt is None else [system_prompt, user_prompt]
+            parts = (
+                [system_prompt] if user_prompt is None else [system_prompt, user_prompt]
+            )
             resp = client.models.generate_content(model=model_name, contents=parts)
             content = (getattr(resp, "text", "") or "").strip()
             if content:
@@ -249,18 +266,53 @@ def _generate_content(system_prompt: str, user_prompt: Optional[str] = None) -> 
     return content
 
 
-def nl_to_sql(*, user_text: str) -> NL2SQLResult:
-    system = _schema_prompt()
-    content = _generate_content(system, user_text)
+def interpret_nlp_request(*, user_text: str) -> ChatOnlyReply | NL2SQLResult:
+    """LLM çıktısı: doğal dil sohbet veya güvenli SELECT sorgusu."""
+    system = _unified_nlp_system_prompt()
+    content = (_generate_content(system, user_text) or "").strip()
+    if not content:
+        raise ValueError("Empty model output.")
 
-    obj = _extract_json(content)
+    obj: Dict[str, Any] | None = None
+    try:
+        obj = _extract_json(content)
+    except Exception:
+        return ChatOnlyReply(message=content[:8000])
+
+    assert obj is not None
+    rtype = str(obj.get("reply_type", "")).strip().lower()
+    msg = str(obj.get("message", "")).strip()
     sql = str(obj.get("sql", "")).strip()
     params = obj.get("params", {}) or {}
     if not isinstance(params, dict):
         raise ValueError("params must be an object/dict.")
 
-    _validate_sql(sql)
-    return NL2SQLResult(sql=sql, params=params)
+    if rtype == "chat":
+        return ChatOnlyReply(message=msg or content[:8000])
+
+    if rtype == "sql":
+        if not sql:
+            return ChatOnlyReply(
+                message=msg
+                or "Veritabanından veri çekmek için sorunuzu netleştirin (ör. tarih aralığı, ürün veya müşteri adı)."
+            )
+        _validate_sql(sql)
+        return NL2SQLResult(sql=sql, params=params)
+
+    # Eski / belirsiz: yalnızca sql+params veya serbest JSON
+    if sql:
+        try:
+            _validate_sql(sql)
+            return NL2SQLResult(sql=sql, params=params)
+        except UnsafeSQL:
+            logger.info(
+                "nlp_sql_rejected_using_chat_fallback", extra={"preview": sql[:120]}
+            )
+            return ChatOnlyReply(message=msg or content[:8000])
+
+    if msg:
+        return ChatOnlyReply(message=msg)
+    return ChatOnlyReply(message=content[:8000])
 
 
 def execute_safe_sql(
@@ -314,34 +366,117 @@ def _fallback_chart_hint(data: List[Dict[str, Any]]) -> Dict[str, Any]:
     return {"type": "none", "x": None, "y": None, "title": ""}
 
 
-def run_nlp_query(db: Session, *, user_text: str, tenant_id: int) -> NlpAnswer:
-    r = nl_to_sql(user_text=user_text)
-    rows = execute_safe_sql(db, sql=r.sql, params=r.params, tenant_id=tenant_id)
-
-    normalized: List[Dict[str, Any]] = []
-    for row in rows:
-        item: Dict[str, Any] = {}
-        for k, v in row.items():
-            if isinstance(v, Decimal):
-                item[k] = float(v)
-            elif isinstance(v, (date, datetime)):
-                item[k] = v.isoformat()
-            else:
-                item[k] = v
-        normalized.append(item)
-
-    columns = list(normalized[0].keys()) if normalized else []
-    answer, chart_hint = summarize_result(user_text=user_text, sql=r.sql, data=normalized)
+def _mock_nlp_answer(user_text: str) -> NlpAnswer:
+    """LLM veya SQL zinciri başarısız olduğunda kullanıcıya anlamlı demo yanıt."""
+    t = user_text.strip().lower()
+    if any(
+        x in t
+        for x in ("merhaba", "selam", "hey", "günaydın", "iyi günler", "iyi aksamlar")
+    ):
+        answer = "Merhaba, Future ERP AI asistanıyım. Size nasıl yardımcı olabilirim?"
+    elif "satış" in t or "satis" in t:
+        answer = (
+            "Satış verilerinizi doğal dilde sorgulayabilirsiniz. Örnek: "
+            '"Son 30 günde en çok satış yapan 5 müşteri" veya "Günlük ciro özeti". '
+            "(Şu an demo yanıt — canlı sorgu bağlantısı kurulamadı.)"
+        )
+    elif "stok" in t:
+        answer = (
+            'Stok için örnek sorular: "Stoğu eşik altında olan ürünler" veya '
+            '"SKU ile ürün ara". (Demo yanıt.)'
+        )
+    elif "finans" in t or "ciro" in t:
+        answer = (
+            'Finans özeti için örnek: "Son ay toplam ciro" veya "En karlı ürünler". '
+            "(Demo yanıt.)"
+        )
+    else:
+        answer = (
+            "Şu an canlı veri sorgusu çalıştırılamadı; demo yanıt modundayım. "
+            'API anahtarlarını (.env) kontrol edin veya "Merhaba" yazarak deneyin.'
+        )
     return NlpAnswer(
-        sql=r.sql,
-        data=normalized,
-        columns=columns,
+        sql="",
+        data=[],
+        columns=[],
         answer=answer,
-        chart_hint=chart_hint,
+        chart_hint={"type": "none", "x": None, "y": None, "title": ""},
     )
 
 
-def run_nlp_query_tuple(db: Session, *, user_text: str, tenant_id: int) -> Tuple[str, List[Dict[str, Any]]]:
+def run_nlp_query(db: Session, *, user_text: str, tenant_id: int) -> NlpAnswer:
+    try:
+        routed = interpret_nlp_request(user_text=user_text)
+        if isinstance(routed, ChatOnlyReply):
+            return NlpAnswer(
+                sql="",
+                data=[],
+                columns=[],
+                answer=routed.message,
+                chart_hint={"type": "none", "x": None, "y": None, "title": ""},
+            )
+
+        rows = execute_safe_sql(
+            db, sql=routed.sql, params=routed.params, tenant_id=tenant_id
+        )
+
+        normalized: List[Dict[str, Any]] = []
+        for row in rows:
+            item: Dict[str, Any] = {}
+            for k, v in row.items():
+                if isinstance(v, Decimal):
+                    item[k] = float(v)
+                elif isinstance(v, (date, datetime)):
+                    item[k] = v.isoformat()
+                else:
+                    item[k] = v
+            normalized.append(item)
+
+        columns = list(normalized[0].keys()) if normalized else []
+        answer, chart_hint = summarize_result(
+            user_text=user_text, sql=routed.sql, data=normalized
+        )
+        return NlpAnswer(
+            sql=routed.sql,
+            data=normalized,
+            columns=columns,
+            answer=answer,
+            chart_hint=chart_hint,
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("nlp_query_fallback", extra={"reason": str(exc)})
+        t = user_text.strip().lower()
+        if any(
+            x in t
+            for x in (
+                "merhaba",
+                "selam",
+                "hey",
+                "günaydın",
+                "gunaydin",
+                "iyi günler",
+                "iyi aksamlar",
+                "teşekkür",
+                "tesekkur",
+                "sağ ol",
+                "sagol",
+            )
+        ):
+            return _mock_nlp_answer(user_text)
+        if isinstance(exc, RuntimeError):
+            return _mock_nlp_answer(user_text)
+        return NlpAnswer(
+            sql="",
+            data=[],
+            columns=[],
+            answer=NLP_FRIENDLY_DB_FAILURE,
+            chart_hint={"type": "none", "x": None, "y": None, "title": ""},
+        )
+
+
+def run_nlp_query_tuple(
+    db: Session, *, user_text: str, tenant_id: int
+) -> Tuple[str, List[Dict[str, Any]]]:
     """Eski arayüz (ikinci öğe rows)."""
     res = run_nlp_query(db, user_text=user_text, tenant_id=tenant_id)
     return res.sql, res.data

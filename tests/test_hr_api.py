@@ -17,3 +17,5 @@ def test_employee_performance_returns_rows(client, test_admin):
     assert 1 <= row["ai_score"] <= 100
     assert len(row["ai_insight"]) > 5
     assert "full_name" in row
+    assert "email" in row and "@" in row["email"]
+    assert row["is_active"] is True

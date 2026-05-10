@@ -1,17 +1,17 @@
-import { Navigate, Route, Routes } from 'react-router-dom'
+import { Navigate, Route, Routes } from "react-router-dom";
 
-import { RequireAuth } from './components/RequireAuth'
-import { NlpAssistantBubble } from './components/NlpAssistantBubble'
-import { AppShell } from './layout/AppShell'
-import { AiAnalysisPage } from './pages/AiAnalysis'
-import AdminPage from './pages/Admin'
-import { DashboardPage } from './pages/Dashboard'
-import { FinancePage } from './pages/Finance'
-import { HrPage } from './pages/Hr'
-import LoginPage from './pages/Login'
-import SignupPage from './pages/Signup'
-import { SalesPage } from './pages/Sales'
-import { StockPage } from './pages/Stock'
+import { NlpAssistantBubble } from "./components/NlpAssistantBubble";
+import { RequireAuth } from "./components/RequireAuth";
+import { AppShell } from "./layout/AppShell";
+import AdminPage from "./pages/Admin";
+import { AiAnalysisPage } from "./pages/AiAnalysis";
+import { DashboardPage } from "./pages/Dashboard";
+import { FinancePage } from "./pages/Finance";
+import { HrPage } from "./pages/Hr";
+import LoginPage from "./pages/Login";
+import { SalesPage } from "./pages/Sales";
+import SignupPage from "./pages/Signup";
+import { StockPage } from "./pages/Stock";
 
 function App() {
   return (
@@ -23,6 +23,9 @@ function App() {
           <Route element={<AppShell />}>
             <Route index element={<Navigate to="/dashboard" replace />} />
             <Route path="dashboard" element={<DashboardPage />} />
+            <Route path="satis" element={<Navigate to="/sales" replace />} />
+            <Route path="stok" element={<Navigate to="/stock" replace />} />
+            <Route path="finans" element={<Navigate to="/finance" replace />} />
             <Route path="sales" element={<SalesPage />} />
             <Route path="stock" element={<StockPage />} />
             <Route path="finance" element={<FinancePage />} />
@@ -35,7 +38,7 @@ function App() {
       </Routes>
       <NlpAssistantBubble />
     </>
-  )
+  );
 }
 
-export default App
+export default App;

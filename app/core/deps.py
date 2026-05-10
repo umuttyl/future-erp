@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Annotated, Callable
+from typing import Annotated, Callable, Optional
 
 import jwt
 from fastapi import Depends
@@ -28,7 +28,7 @@ class TenantContext:
 
 
 def get_current_principal(
-    cred: Annotated[HTTPAuthorizationCredentials | None, Depends(security)],
+    cred: Annotated[Optional[HTTPAuthorizationCredentials], Depends(security)],
 ) -> AuthPrincipal:
     if cred is None or not cred.credentials:
         raise UnauthorizedException("Oturum gerekli.", code="UNAUTHORIZED")

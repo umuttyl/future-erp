@@ -149,13 +149,13 @@ export function AiAnalysisPage() {
 
   async function askQuestion(text?: string) {
     const q = (text ?? question).trim()
-    if (q.length < 3) return
+    if (q.length < 1) return
     setQuestion(q)
     setQLoading(true)
     setQError(null)
     setQResult(null)
     try {
-      const { data } = await api.post<NlpQueryResponse>('/nlp/query', { text: q })
+      const { data } = await api.post<NlpQueryResponse>("/chat", { text: q })
       setQResult(data)
     } catch (e: unknown) {
       setQError(getApiErrorMessage(e, 'Soru çalıştırılamadı'))

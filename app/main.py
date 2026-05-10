@@ -6,6 +6,7 @@ Tablo oluşturma Alembic ile:
 Global exception handler'lar tek tip JSON hatasi döner:
     ``{"error": {"code": "...", "message": "..." }}``
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -133,7 +134,11 @@ def register_exception_handlers(app: FastAPI) -> None:
 
 
 def create_app() -> FastAPI:
-    app = FastAPI(title=settings.PROJECT_NAME, lifespan=lifespan)
+    app = FastAPI(
+        title=settings.PROJECT_NAME,
+        lifespan=lifespan,
+        redirect_slashes=False,
+    )
     register_exception_handlers(app)
     # HTTP CORS; WebSocket el sıkışması tarayıcı kökeni + Vite proxy (ws: true) ile aynı mantıkta çalışır.
     app.add_middleware(

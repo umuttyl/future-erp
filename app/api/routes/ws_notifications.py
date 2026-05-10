@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Optional
+
 from fastapi import APIRouter, Query, WebSocket, WebSocketDisconnect
 from jwt.exceptions import InvalidTokenError
 
@@ -15,7 +17,7 @@ router = APIRouter()
 @router.websocket("/ws/notifications")
 async def websocket_notifications(
     websocket: WebSocket,
-    access_token: str | None = Query(None, description="JWT access token (URL sorgu parametresi)"),
+    access_token: Optional[str] = Query(None, description="JWT access token (URL sorgu parametresi)"),
 ):
     """İstemci bağlantısı; geçerli access token ve ``ai.insights.read`` izni gerekir."""
     if not access_token:

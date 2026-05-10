@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import {
   Brain,
   HelpCircle,
@@ -13,6 +14,7 @@ import {
 import { NavLink } from 'react-router-dom'
 
 import { useAuth } from '../../context/AuthContext'
+import { HelpModal } from './HelpModal'
 
 type NavDef = { to: string; label: string; perm: string; icon: typeof LayoutDashboard }
 
@@ -29,9 +31,12 @@ const MAIN_NAV: NavDef[] = [
 export function AppSidebar() {
   const { user, logout, hasPermission } = useAuth()
   const items = MAIN_NAV.filter((n) => hasPermission(n.perm))
+  const [helpOpen, setHelpOpen] = useState(false)
 
   return (
-    <aside className="flex w-[260px] shrink-0 flex-col border-r border-surface-border bg-surface-card dark:border-white/10 dark:bg-[#12101f] dark:shadow-none">
+    <>
+      <HelpModal open={helpOpen} onClose={() => setHelpOpen(false)} />
+      <aside className="flex w-[260px] shrink-0 flex-col border-r border-surface-border bg-surface-card dark:border-white/10 dark:bg-[#12101f] dark:shadow-none">
       <div className="flex items-center gap-3 px-5 py-6">
         <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-violet-500 to-brand-700 text-white shadow-lg shadow-violet-500/25">
           <Sparkles className="h-5 w-5" strokeWidth={2} />
@@ -73,6 +78,7 @@ export function AppSidebar() {
       <div className="mt-auto space-y-1 border-t border-surface-border px-3 py-4 dark:border-white/10">
         <button
           type="button"
+          onClick={() => setHelpOpen(true)}
           className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-sm text-slate-600 transition hover:bg-slate-100 dark:text-slate-400 dark:hover:bg-white/5"
         >
           <HelpCircle className="h-[18px] w-[18px]" strokeWidth={2} />
@@ -97,5 +103,6 @@ export function AppSidebar() {
         </div>
       ) : null}
     </aside>
+    </>
   )
 }

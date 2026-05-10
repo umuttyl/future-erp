@@ -62,8 +62,8 @@ class HrPerformanceService:
     def list_employee_performance(self, db: Session, tenant_id: int) -> List[dict]:
         stmt_users = (
             select(User)
-            .where(User.tenant_id == tenant_id, User.is_active.is_(True))
-            .order_by(User.id.asc())
+            .where(User.tenant_id == tenant_id)
+            .order_by(User.is_active.desc(), User.id.asc())
         )
         users = list(db.scalars(stmt_users).all())
 
@@ -96,6 +96,8 @@ class HrPerformanceService:
                 {
                     "id": u.id,
                     "full_name": _display_name(u),
+                    "email": u.email,
+                    "is_active": bool(u.is_active),
                     "role": u.role,
                     "department": u.department,
                     "ai_score": score,

@@ -10,6 +10,8 @@ class EmployeePerformanceOut(BaseModel):
 
     id: int = Field(description="Kullanıcı (çalışan) ID")
     full_name: str = Field(description="Görünen ad")
+    email: str = Field(description="Kurumsal e-posta")
+    is_active: bool = Field(description="Hesap aktif mi")
     role: str
     department: Optional[str] = None
     ai_score: int = Field(ge=1, le=100, description="Verimlilik skoru 1-100")
