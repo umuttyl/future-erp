@@ -36,11 +36,23 @@ async def websocket_notifications(
         await websocket.close(code=1008, reason="gecersiz token")
         return
 
-    await notification_manager.connect(websocket)
+    tid_raw = payload.get("tid")
+    if tid_raw is None:
+        await websocket.close(code=1008, reason="tenant kimliği yok")
+        return
+    try:
+        tenant_id = int(tid_raw)
+        if tenant_id <= 0:
+            raise ValueError
+    except (TypeError, ValueError):
+        await websocket.close(code=1008, reason="geçersiz tenant kimliği")
+        return
+
+    await notification_manager.connect(websocket, tenant_id)
     try:
         while True:
             await websocket.receive_text()
     except WebSocketDisconnect:
         pass
     finally:
-        notification_manager.disconnect(websocket)
+        notification_manager.disconnect(websocket, tenant_id)
