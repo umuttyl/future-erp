@@ -10,6 +10,10 @@ from unittest.mock import MagicMock, patch
 import pytest
 from sqlalchemy.orm import Session
 
+from decimal import Decimal
+
+from app.models.product import Product
+from app.models.stock_movement import StockMovement
 from app.services.anomaly_service import (
     MIN_SAMPLES,
     AnomalyResult,
@@ -258,10 +262,10 @@ class TestDetectSalesAnomalies:
 
 
 class TestDetectInventoryAnomalies:
-    def _make_row(self, id, quantity_change, movement_type="in", product_name="Urun", product_id=1):
+    def _make_row(self, id, change, movement_type="in", product_name="Urun", product_id=1):
         row = MagicMock()
         row.id = id
-        row.quantity_change = quantity_change
+        row.change = change          # gercek kolon adi
         row.movement_type = movement_type
         row.product_name = product_name
         row.product_id = product_id
@@ -269,7 +273,7 @@ class TestDetectInventoryAnomalies:
 
     def _db_with_rows(self, rows):
         db = MagicMock(spec=Session)
-        db.execute.return_value.fetchall.return_value = rows
+        db.execute.return_value.all.return_value = rows
         return db
 
     def test_normal_movements_no_crash(self):
@@ -426,3 +430,69 @@ class TestAnomalyRunEndpoint:
         body = resp.json()
         sources = {a["source"] for a in body["anomalies"]}
         assert "finance" not in sources
+
+
+# ---------------------------------------------------------------------------
+# Gercek DB: detect_inventory_anomalies 'change' kolonunu kullaniyor (ACTION_PLAN P0-3)
+# ---------------------------------------------------------------------------
+
+
+class TestDetectInventoryAnomaliesRealDb:
+    def _seed_movements(self, db_session, tenant_id: int, product_id: int, values: list[int]):
+        """Verilen change degerlerini StockMovement olarak seed eder."""
+        for val in values:
+            sm = StockMovement(
+                tenant_id=tenant_id,
+                product_id=product_id,
+                movement_type="in" if val >= 0 else "out",
+                change=val,
+                balance_after=100 + val,
+            )
+            db_session.add(sm)
+        db_session.flush()
+
+    def test_uses_change_column_no_operational_error(self, db_session, test_tenant):
+        """Ham SQL hatasi: 'change' kolonu kullanilmali, 'quantity_change' degil.
+
+        Bu test gercek DB ile calisir; ORM sorgusu dogru kolonu kullanirsa
+        OperationalError firlatmadan liste doner.
+        """
+        product = Product(
+            tenant_id=test_tenant.id,
+            sku="TEST-P0-3",
+            name="Anomali Test Urunu",
+            unit_price=Decimal("10.00"),
+            cost_price=Decimal("5.00"),
+        )
+        db_session.add(product)
+        db_session.flush()
+
+        # MIN_SAMPLES (5) kadar normal + 1 extreme outlier
+        normal_vals = [10, 10, 10, 10, 10, 10, 10, 10, 10]
+        self._seed_movements(db_session, test_tenant.id, product.id, normal_vals + [-99999])
+
+        results = detect_inventory_anomalies(db_session, tenant_id=test_tenant.id)
+
+        assert isinstance(results, list), "OperationalError olmadan liste donmeli"
+        # Outlier tespit edilmis olmali
+        assert any(r.source == "inventory" for r in results)
+
+    def test_result_extra_has_quantity_change_key(self, db_session, test_tenant):
+        """Sonuc extra'sinda 'quantity_change' anahtari geriye donuk uyumluluk icin korunmali."""
+        product = Product(
+            tenant_id=test_tenant.id,
+            sku="TEST-P0-3B",
+            name="Uyumluluk Test Urunu",
+            unit_price=Decimal("10.00"),
+            cost_price=Decimal("5.00"),
+        )
+        db_session.add(product)
+        db_session.flush()
+
+        normal_vals = [10] * 9
+        self._seed_movements(db_session, test_tenant.id, product.id, normal_vals + [-99999])
+
+        results = detect_inventory_anomalies(db_session, tenant_id=test_tenant.id)
+
+        for r in results:
+            assert "quantity_change" in r.extra, "Frontend uyumu icin 'quantity_change' anahtari olmali"

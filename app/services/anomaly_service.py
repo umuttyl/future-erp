@@ -9,13 +9,15 @@ Kullanılan teknik: sklearn.ensemble.IsolationForest
 """
 from __future__ import annotations
 
-import time
 from dataclasses import dataclass, field
 from typing import Any
 
 import structlog
 from sqlalchemy import select, text
 from sqlalchemy.orm import Session
+
+from app.models.product import Product
+from app.models.stock_movement import StockMovement
 
 logger = structlog.get_logger(__name__)
 
@@ -153,32 +155,32 @@ def detect_sales_anomalies(db: Session, *, tenant_id: int) -> list[AnomalyResult
 
 def detect_inventory_anomalies(db: Session, *, tenant_id: int) -> list[AnomalyResult]:
     """Stok hareketi miktarlarında beklenmedik düşüş veya artışları tespit eder."""
-    rows = db.execute(
-        text(
-            """
-            SELECT sm.id, sm.product_id, p.name AS product_name,
-                   sm.quantity_change, sm.movement_type
-            FROM stock_movements sm
-            JOIN products p ON p.id = sm.product_id
-            WHERE sm.tenant_id = :tid
-            ORDER BY sm.id DESC
-            LIMIT 100
-            """
-        ),
-        {"tid": tenant_id},
-    ).fetchall()
+    stmt = (
+        select(
+            StockMovement.id,
+            StockMovement.product_id,
+            Product.name.label("product_name"),
+            StockMovement.change,
+            StockMovement.movement_type,
+        )
+        .join(Product, Product.id == StockMovement.product_id)
+        .where(StockMovement.tenant_id == tenant_id)
+        .order_by(StockMovement.id.desc())
+        .limit(100)
+    )
+    rows = db.execute(stmt).all()
 
     if len(rows) < MIN_SAMPLES:
         return []
 
-    changes = [float(r.quantity_change) for r in rows]
+    changes = [float(r.change) for r in rows]
     scores = _isolation_forest_scores(changes)
 
     results: list[AnomalyResult] = []
     for row, score in zip(rows, scores):
         if score < -0.15:
             severity = "critical" if score < -0.25 else "warning"
-            direction = "düşüş" if row.quantity_change < 0 else "artış"
+            direction = "düşüş" if row.change < 0 else "artış"
             results.append(
                 AnomalyResult(
                     source="inventory",
@@ -186,13 +188,13 @@ def detect_inventory_anomalies(db: Session, *, tenant_id: int) -> list[AnomalyRe
                     title=f"Anormal Stok {direction.capitalize()}ı",
                     message=(
                         f"{row.product_name} ürününde beklenmedik stok {direction}: "
-                        f"{abs(row.quantity_change)} adet ({row.movement_type})"
+                        f"{abs(row.change)} adet ({row.movement_type})"
                     ),
                     score=score,
                     entity_id=row.product_id,
                     entity_label=row.product_name,
                     extra={
-                        "quantity_change": float(row.quantity_change),
+                        "quantity_change": float(row.change),  # response anahtarı geriye uyumlu
                         "movement_type": row.movement_type,
                         "product_id": row.product_id,
                     },
