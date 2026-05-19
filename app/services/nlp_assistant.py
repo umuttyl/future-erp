@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import logging
 import re
 from dataclasses import dataclass
 from datetime import date, datetime
@@ -9,6 +8,7 @@ from decimal import Decimal
 from typing import Any, Dict, List, Optional, Tuple
 
 import sqlglot
+import structlog
 from google import genai
 from openai import OpenAI
 from sqlalchemy import text
@@ -16,13 +16,15 @@ from sqlalchemy.engine import Result
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
+from app.core.module_config import ModuleKey, allowed_tables_for_modules
 
-logger = logging.getLogger(__name__)
+logger = structlog.get_logger(__name__)
 
 NLP_FRIENDLY_DB_FAILURE = (
     "Üzgünüm, bu isteğinizi veritabanından çekemedim. Daha farklı bir şekilde sorabilir misiniz?"
 )
 
+# Varsayılan tablo whitelist (geriye uyumluluk için korunur)
 ALLOWED_TABLES = {
     "products",
     "sales_records",
@@ -30,6 +32,129 @@ ALLOWED_TABLES = {
     "sales_forecast_results",
     "stock_movements",
 }
+
+# Admin: tüm platform tablolarına erişim (cross-tenant)
+_ADMIN_ALL_TABLES: set[str] = {
+    "products", "sales_records", "sales_items", "sales_forecast_results",
+    "stock_movements", "customers", "suppliers",
+    "supply_orders", "tenants", "users",
+}
+
+# Role bazında erişilebilir tablolar (module_config'den bağımsız ek kısıtlar)
+_ROLE_TABLE_RESTRICTIONS: dict[str, set[str]] = {
+    "admin": set(),   # Kısıt yok — tüm tablolara erişim
+    "manager": set(), # Kısıt yok — tüm tablolara erişim
+    "employee": {     # Sadece kendi işiyle ilgili tablolar (tüm tenant verisine değil)
+        "products",
+        "sales_records",
+        "sales_items",
+        "stock_movements",
+    },
+}
+
+
+def _build_allowed_tables(
+    user_role: str,
+    active_modules: list[str] | None = None,
+) -> set[str]:
+    """Kullanıcı rolü ve aktif modüllere göre izin verilen tablo kümesini döner."""
+    # Admin tüm platform tablolarına erişir (cross-tenant)
+    if user_role == "admin":
+        return _ADMIN_ALL_TABLES.copy()
+
+    if active_modules:
+        module_tables = set(allowed_tables_for_modules(active_modules))
+    else:
+        module_tables = ALLOWED_TABLES.copy()
+
+    role_restriction = _ROLE_TABLE_RESTRICTIONS.get(user_role)
+    if role_restriction:
+        # Employee: sadece role_restriction içindeki tablolar
+        return module_tables & role_restriction
+    # Manager: modüle göre tüm tablolar
+    return module_tables
+
+
+_MODULE_LABELS: dict[str, str] = {
+    ModuleKey.SALES: "Satış Yönetimi",
+    ModuleKey.INVENTORY: "Stok Takibi",
+    ModuleKey.FINANCE: "Finans",
+    ModuleKey.CRM: "Müşteri Yönetimi",
+    ModuleKey.SUPPLIERS: "Tedarikçi",
+    ModuleKey.PURCHASING: "Satınalma",
+    ModuleKey.HR: "İnsan Kaynakları",
+    ModuleKey.AI: "AI Analiz",
+}
+
+
+def _role_context_for_prompt(
+    user_role: str,
+    active_modules: list[str] | None,
+    tenant_name: str = "",
+) -> str:
+    """Sistem prompt'una eklenecek role-aware bağlam metni üretir."""
+    company = f" {tenant_name}" if tenant_name else ""
+
+    if user_role == "admin":
+        return (
+            f"ROL BAĞLAMI: Sen bir PLATFORM YÖNETİCİSİ asistanısın (süper admin).{company}\n"
+            "- TÜM şirketlerin verilerine (ürün, satış, stok, finans, müşteri, çalışan) tam erişimin var.\n"
+            "- Tenantlar arası karşılaştırma, platform geneli istatistik, şirket bazlı analiz yapabilirsin.\n"
+            "- `tenants` tablosundan şirket listesini, `users` tablosundan kullanıcıları sorgulayabilirsin.\n"
+            "- Sorgularda tenant_id filtresi zorunlu değil; istersen tüm veya belirli bir şirketi sorgula.\n"
+            "Türkçe yanıt ver; platform odaklı, veri-driven ve özlü ol."
+        )
+
+    if user_role == "manager":
+        if active_modules:
+            active_labels = [_MODULE_LABELS.get(m, m) for m in active_modules]
+            modules_note = f"\n- Aktif ERP modüllerin: {', '.join(active_labels)}"
+        else:
+            modules_note = ""
+        return (
+            f"ROL BAĞLAMI: Sen{company} şirketinin STRATEJİK İŞ ASİSTANISIN (şirket müdürü/sahibi).{modules_note}\n"
+            "- Şirketin tüm verilerine (satış, stok, finans, müşteri, tedarikçi) erişim hakkın var.\n"
+            "- Ciro tahminleri, envanter optimizasyonu, müşteri analizi, karlılık konularında derin analiz yap.\n"
+            "- SADECE kendi şirketinin verilerini görürsün; başka şirket bilgisi paylaşma.\n"
+            "Türkçe yanıt ver; stratejik, veriye dayalı ve iş odaklı ol."
+        )
+
+    # Employee
+    allowed_ops = []
+    if active_modules:
+        if ModuleKey.SALES in active_modules:
+            allowed_ops.append("satış kayıtları")
+        if ModuleKey.INVENTORY in active_modules:
+            allowed_ops.append("stok durumu")
+        if ModuleKey.CRM in active_modules:
+            allowed_ops.append("müşteri bilgileri")
+    if not allowed_ops:
+        allowed_ops = ["ürün bilgileri", "stok durumu"]
+
+    return (
+        f"ROL BAĞLAMI: Sen{company} şirketinde çalışan bir OPERASYONEL ÇALIŞAN asistanısın.\n"
+        f"- Sadece şu konularda yardım edersin: {', '.join(allowed_ops)}.\n"
+        "- Şirket finansalları (kâr, zarar, maaş, ciro toplamı) hakkında KESİNLİKLE bilgi verme.\n"
+        "- İK ve çalışan kayıtlarına erişimin YOK.\n"
+        "- Eğer bunları sorarlarsa Türkçe olarak: 'Bu bilgiye erişim yetkiniz bulunmuyor.' de.\n"
+        "Türkçe yanıt ver; kısa, net ve göreve odaklı ol."
+    )
+
+
+_INJECTION_PATTERNS = re.compile(
+    r"(ignore\s+(previous|all)\s+(instructions?|prompts?)|"
+    r"system\s*:|<\|im_start\|>|<\|im_end\|>|"
+    r"\[INST\]|\[/INST\]|###\s*instruction|"
+    r"you\s+are\s+now|forget\s+(your|all)\s+(previous|instructions?))",
+    re.IGNORECASE,
+)
+_MAX_INPUT_CHARS = 500
+
+
+def _sanitize_user_input(text: str) -> str:
+    """Prompt injection kalıplarını kaldır ve uzunluğu sınırla."""
+    cleaned = _INJECTION_PATTERNS.sub("", text)
+    return cleaned[:_MAX_INPUT_CHARS].strip()
 
 
 class UnsafeSQL(Exception):
@@ -58,8 +183,39 @@ class ChatOnlyReply:
     message: str
 
 
-def _unified_nlp_system_prompt() -> str:
-    return """You are the Future ERP AI assistant (Sen Future ERP AI asistanısın).
+def _unified_nlp_system_prompt(
+    user_role: str = "manager",
+    active_modules: list[str] | None = None,
+    tenant_name: str = "",
+) -> str:
+    allowed = _build_allowed_tables(user_role, active_modules)
+    allowed_tables_list = ", ".join(sorted(allowed)) if allowed else "products"
+    role_context = _role_context_for_prompt(user_role, active_modules, tenant_name)
+
+    is_admin = user_role == "admin"
+
+    # Admin için cross-tenant schema ve kurallar; diğer roller için tenant-scoped
+    if is_admin:
+        tenant_filter_rule = (
+            "- PLATFORM ADMIN olarak tenant_id filtresi zorunlu değil — tüm şirketlerin verilerine erişebilirsin.\n"
+            "- Belirli bir şirket sorgusu için WHERE tenant_id = X kullanabilirsin.\n"
+            "- Şirket adı için tenants tablosunu JOIN edebilirsin (tenants.id = <tablo>.tenant_id).\n"
+            "- Tenant bazlı gruplama: GROUP BY tenant_id veya GROUP BY t.name (JOIN tenants t ON t.id = tenant_id)."
+        )
+        extra_schema = """
+Table: tenants
+  - id, slug, name, sector, is_active, created_at
+
+Table: users
+  - id, tenant_id, email, full_name, role ('admin'|'manager'|'employee')
+"""
+    else:
+        tenant_filter_rule = "- Every referenced table MUST be filtered with tenant_id = :tid (bind :tid)"
+        extra_schema = ""
+
+    return f"""You are the Future ERP AI assistant (Sen Future ERP AI asistanısın).
+
+{role_context}
 
 CRITICAL: If the user is ONLY greeting or chatting (e.g. "Merhaba", "Nasılsın", "Ne yapabilirsin?", "Teşekkürler"),
 you MUST NOT produce SQL. Reply in Turkish in a warm, natural, friendly way (reply_type "chat").
@@ -67,12 +223,9 @@ you MUST NOT produce SQL. Reply in Turkish in a warm, natural, friendly way (rep
 ONLY when the user clearly asks for specific data or a report (e.g. "En çok satan ürünler", "Son 30 gün ciro")
 should you use reply_type "sql" with one safe SELECT.
 
-FIRST decide whether the user needs LIVE DATA from the tenant database or a CONVERSATIONAL answer only.
-
 Use reply_type "chat" (no SQL) when:
 - Greetings, thanks, small talk ("merhaba", "teşekkürler").
-- Conceptual or general questions that do NOT require querying tables (e.g. "talep tahmini nedir", "bu modül ne işe yarar", "nasıl çalışır", definitions, methodology).
-- Advice or help text where specific row counts or lists from the DB are not requested.
+- Conceptual or general questions that do NOT require querying tables.
 
 Use reply_type "sql" ONLY when the user clearly wants factual rows or aggregates from the database:
 lists, counts, sums, rankings, "top N", filters by date/SKU/customer, stock below threshold, etc.
@@ -80,16 +233,17 @@ lists, counts, sums, rankings, "top N", filters by date/SKU/customer, stock belo
 Output EXACTLY one JSON object (no markdown fences, no prose outside JSON):
 
 Chat-only:
-{ "reply_type": "chat", "message": "<answer in Turkish, clear and concise>" }
+{{ "reply_type": "chat", "message": "<answer in Turkish, clear and concise>" }}
 
 Database query:
-{ "reply_type": "sql", "sql": "<single SELECT>", "params": { } }
+{{ "reply_type": "sql", "sql": "<single SELECT>", "params": {{ }} }}
 
-Schema (PostgreSQL compatible; SQLite-friendly when possible):
+ALLOWED TABLES for this user: {allowed_tables_list}
+DO NOT reference any table not in this list.
 
+Schema (SQLite-friendly):{extra_schema}
 Table: products
-  - id, tenant_id (int, fk) — REQUIRED filter tenant_id = :tid
-  - sku, name, category, unit_price, cost_price, stock_quantity, reorder_level
+  - id, tenant_id (int, fk), sku, name, category, unit_price, cost_price, stock_quantity, reorder_level
 
 Table: sales_records
   - id, tenant_id, record_no, sale_date, customer_name, total_amount
@@ -101,17 +255,25 @@ Table: sales_forecast_results
   - id, tenant_id, model_name, scope, product_id, forecast_start, horizon_days, result_payload, created_at
 
 Table: stock_movements
-  - id, tenant_id, product_id, movement_type ('in'|'out'|'adjust'), change, balance_after, reference, note, created_at
+  - id, tenant_id, product_id, movement_type ('in'|'out'|'adjust'), change, balance_after, reference, created_at
+
+Table: customers
+  - id, tenant_id, name, email, phone, address, customer_type, notes, created_at
+
+Table: suppliers
+  - id, tenant_id, name, contact_person, email, phone, payment_terms, notes, created_at
+
+Table: supply_orders
+  - id, tenant_id, product_id, quantity, status, created_at
 
 SQL rules (only when reply_type is "sql"):
 - sql MUST be a single SELECT (no INSERT/UPDATE/DELETE/DDL, no multiple statements)
-- Allowed tables only: products, sales_records, sales_items, sales_forecast_results, stock_movements
+- Use ONLY tables from the ALLOWED TABLES list above
 - Never use SELECT * (explicit columns)
-- Every referenced table MUST be filtered with tenant_id = :tid (bind :tid)
+{tenant_filter_rule}
 - Named parameters :limit, :start_date, :end_date, :product_id as needed
-- If "en yüksek kâr" but cost unclear, interpret as revenue (line_total / total_amount)
 - Default LIMIT 5 when user asks "top" without N
-- Prefer Turkish-friendly column aliases (urun_adi, toplam_ciro, stok)
+- Prefer Turkish-friendly column aliases (urun_adi, toplam_ciro, stok, sirket_adi)
 """
 
 
@@ -164,7 +326,11 @@ def _extract_json(text_out: str) -> Dict[str, Any]:
     return json.loads(m.group(0))
 
 
-def _validate_sql(sql: str) -> None:
+def _validate_sql(
+    sql: str,
+    allowed_tables: set[str] | None = None,
+    cross_tenant: bool = False,
+) -> None:
     raw = sql.strip()
 
     if ";" in raw:
@@ -184,31 +350,22 @@ def _validate_sql(sql: str) -> None:
         raise UnsafeSQL("Only SELECT queries are allowed.")
 
     bad_keywords = [
-        "INSERT",
-        "UPDATE",
-        "DELETE",
-        "DROP",
-        "ALTER",
-        "TRUNCATE",
-        "CREATE",
-        "GRANT",
-        "REVOKE",
-        "COPY",
-        "VACUUM",
-        "ATTACH",
-        "DETACH",
-        "PRAGMA",
+        "INSERT", "UPDATE", "DELETE", "DROP", "ALTER", "TRUNCATE",
+        "CREATE", "GRANT", "REVOKE", "COPY", "VACUUM", "ATTACH", "DETACH", "PRAGMA",
     ]
     up = raw.upper()
     if any(k in up for k in bad_keywords):
         raise UnsafeSQL("Non-SELECT keywords are not allowed.")
 
+    # Rol/modüle göre dinamik tablo whitelist kullan; yoksa varsayılan
+    effective_allowed = allowed_tables if allowed_tables is not None else ALLOWED_TABLES
     tables = {t.name for t in expr.find_all(sqlglot.expressions.Table)}
-    unknown = {t for t in tables if t not in ALLOWED_TABLES}
+    unknown = {t for t in tables if t not in effective_allowed}
     if unknown:
         raise UnsafeSQL(f"Unknown/forbidden tables: {sorted(unknown)}")
 
-    if ":tid" not in raw.lower():
+    # Admin cross-tenant sorgularında :tid filtresi zorunlu değil
+    if not cross_tenant and ":tid" not in raw.lower():
         raise UnsafeSQL("Sorgu kiracı filtresi (:tid) içermiyor.")
 
 
@@ -266,10 +423,23 @@ def _generate_content(system_prompt: str, user_prompt: Optional[str] = None) -> 
     return content
 
 
-def interpret_nlp_request(*, user_text: str) -> ChatOnlyReply | NL2SQLResult:
+def interpret_nlp_request(
+    *,
+    user_text: str,
+    user_role: str = "manager",
+    active_modules: list[str] | None = None,
+    tenant_name: str = "",
+) -> ChatOnlyReply | NL2SQLResult:
     """LLM çıktısı: doğal dil sohbet veya güvenli SELECT sorgusu."""
-    system = _unified_nlp_system_prompt()
-    content = (_generate_content(system, user_text) or "").strip()
+    cross_tenant = user_role == "admin"
+    safe_text = _sanitize_user_input(user_text)
+    allowed = _build_allowed_tables(user_role, active_modules)
+    system = _unified_nlp_system_prompt(
+        user_role=user_role, active_modules=active_modules, tenant_name=tenant_name
+    )
+    # Kullanıcı girdisi sistem talimatından net biçimde ayrılır (prompt injection önlemi).
+    tagged_input = f"<user_input>{safe_text}</user_input>"
+    content = (_generate_content(system, tagged_input) or "").strip()
     if not content:
         raise ValueError("Empty model output.")
 
@@ -296,13 +466,13 @@ def interpret_nlp_request(*, user_text: str) -> ChatOnlyReply | NL2SQLResult:
                 message=msg
                 or "Veritabanından veri çekmek için sorunuzu netleştirin (ör. tarih aralığı, ürün veya müşteri adı)."
             )
-        _validate_sql(sql)
+        _validate_sql(sql, allowed_tables=allowed, cross_tenant=cross_tenant)
         return NL2SQLResult(sql=sql, params=params)
 
     # Eski / belirsiz: yalnızca sql+params veya serbest JSON
     if sql:
         try:
-            _validate_sql(sql)
+            _validate_sql(sql, allowed_tables=allowed, cross_tenant=cross_tenant)
             return NL2SQLResult(sql=sql, params=params)
         except UnsafeSQL:
             logger.info(
@@ -316,10 +486,15 @@ def interpret_nlp_request(*, user_text: str) -> ChatOnlyReply | NL2SQLResult:
 
 
 def execute_safe_sql(
-    db: Session, *, sql: str, params: Dict[str, Any], tenant_id: int
+    db: Session,
+    *,
+    sql: str,
+    params: Dict[str, Any],
+    tenant_id: int,
+    cross_tenant: bool = False,
 ) -> List[Dict[str, Any]]:
-    _validate_sql(sql)
-    merged = {**params, "tid": tenant_id}
+    _validate_sql(sql, cross_tenant=cross_tenant)
+    merged = {**params} if cross_tenant else {**params, "tid": tenant_id}
     with db.get_bind().connect() as conn:
         res: Result = conn.execute(text(sql), merged)
         rows = res.mappings().all()
@@ -366,47 +541,22 @@ def _fallback_chart_hint(data: List[Dict[str, Any]]) -> Dict[str, Any]:
     return {"type": "none", "x": None, "y": None, "title": ""}
 
 
-def _mock_nlp_answer(user_text: str) -> NlpAnswer:
-    """LLM veya SQL zinciri başarısız olduğunda kullanıcıya anlamlı demo yanıt."""
-    t = user_text.strip().lower()
-    if any(
-        x in t
-        for x in ("merhaba", "selam", "hey", "günaydın", "iyi günler", "iyi aksamlar")
-    ):
-        answer = "Merhaba, Future ERP AI asistanıyım. Size nasıl yardımcı olabilirim?"
-    elif "satış" in t or "satis" in t:
-        answer = (
-            "Satış verilerinizi doğal dilde sorgulayabilirsiniz. Örnek: "
-            '"Son 30 günde en çok satış yapan 5 müşteri" veya "Günlük ciro özeti". '
-            "(Şu an demo yanıt — canlı sorgu bağlantısı kurulamadı.)"
-        )
-    elif "stok" in t:
-        answer = (
-            'Stok için örnek sorular: "Stoğu eşik altında olan ürünler" veya '
-            '"SKU ile ürün ara". (Demo yanıt.)'
-        )
-    elif "finans" in t or "ciro" in t:
-        answer = (
-            'Finans özeti için örnek: "Son ay toplam ciro" veya "En karlı ürünler". '
-            "(Demo yanıt.)"
-        )
-    else:
-        answer = (
-            "Şu an canlı veri sorgusu çalıştırılamadı; demo yanıt modundayım. "
-            'API anahtarlarını (.env) kontrol edin veya "Merhaba" yazarak deneyin.'
-        )
-    return NlpAnswer(
-        sql="",
-        data=[],
-        columns=[],
-        answer=answer,
-        chart_hint={"type": "none", "x": None, "y": None, "title": ""},
-    )
-
-
-def run_nlp_query(db: Session, *, user_text: str, tenant_id: int) -> NlpAnswer:
+def run_nlp_query(
+    db: Session,
+    *,
+    user_text: str,
+    tenant_id: int,
+    user_role: str = "manager",
+    active_modules: list[str] | None = None,
+    tenant_name: str = "",
+) -> NlpAnswer:
     try:
-        routed = interpret_nlp_request(user_text=user_text)
+        routed = interpret_nlp_request(
+            user_text=user_text,
+            user_role=user_role,
+            active_modules=active_modules,
+            tenant_name=tenant_name,
+        )
         if isinstance(routed, ChatOnlyReply):
             return NlpAnswer(
                 sql="",
@@ -416,8 +566,9 @@ def run_nlp_query(db: Session, *, user_text: str, tenant_id: int) -> NlpAnswer:
                 chart_hint={"type": "none", "x": None, "y": None, "title": ""},
             )
 
+        cross_tenant = user_role == "admin"
         rows = execute_safe_sql(
-            db, sql=routed.sql, params=routed.params, tenant_id=tenant_id
+            db, sql=routed.sql, params=routed.params, tenant_id=tenant_id, cross_tenant=cross_tenant
         )
 
         normalized: List[Dict[str, Any]] = []
@@ -444,27 +595,7 @@ def run_nlp_query(db: Session, *, user_text: str, tenant_id: int) -> NlpAnswer:
             chart_hint=chart_hint,
         )
     except Exception as exc:  # noqa: BLE001
-        logger.warning("nlp_query_fallback", extra={"reason": str(exc)})
-        t = user_text.strip().lower()
-        if any(
-            x in t
-            for x in (
-                "merhaba",
-                "selam",
-                "hey",
-                "günaydın",
-                "gunaydin",
-                "iyi günler",
-                "iyi aksamlar",
-                "teşekkür",
-                "tesekkur",
-                "sağ ol",
-                "sagol",
-            )
-        ):
-            return _mock_nlp_answer(user_text)
-        if isinstance(exc, RuntimeError):
-            return _mock_nlp_answer(user_text)
+        logger.warning("nlp_query_fallback", reason=str(exc))
         return NlpAnswer(
             sql="",
             data=[],
@@ -477,6 +608,6 @@ def run_nlp_query(db: Session, *, user_text: str, tenant_id: int) -> NlpAnswer:
 def run_nlp_query_tuple(
     db: Session, *, user_text: str, tenant_id: int
 ) -> Tuple[str, List[Dict[str, Any]]]:
-    """Eski arayüz (ikinci öğe rows)."""
+    """Eski arayz (ikinci oge rows) - geriye donuk uyumluluk."""
     res = run_nlp_query(db, user_text=user_text, tenant_id=tenant_id)
     return res.sql, res.data
