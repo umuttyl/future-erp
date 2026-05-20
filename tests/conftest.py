@@ -152,3 +152,36 @@ def client_no_auth(db_session: Session) -> Generator[TestClient, None, None]:
             yield tc
     finally:
         application.dependency_overrides.clear()
+
+
+@pytest.fixture
+def client_for(db_session: Session):
+    """Factory fixture: herhangi bir User için yetkili TestClient döner."""
+    _active: list[TestClient] = []
+
+    def _make(user: User) -> TestClient:
+        application = create_app()
+        principal = AuthPrincipal(
+            user_id=user.id,
+            tenant_id=user.tenant_id,
+            email=user.email,
+            role=user.role,
+        )
+
+        def _override_db() -> Generator[Session, None, None]:
+            yield db_session
+
+        application.dependency_overrides[get_db] = _override_db
+        application.dependency_overrides[get_current_principal] = lambda: principal
+        tc = TestClient(application, raise_server_exceptions=False)
+        tc.__enter__()
+        _active.append(tc)
+        return tc
+
+    yield _make
+
+    for tc in _active:
+        try:
+            tc.__exit__(None, None, None)
+        except Exception:
+            pass
