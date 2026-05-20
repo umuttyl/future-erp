@@ -83,6 +83,11 @@ api.interceptors.request.use((config) => {
       config.headers.Authorization = `Bearer ${t}`;
     }
   }
+  // Impersonation header must not reach auth endpoints (login, me, refresh, logout)
+  const url = String(config.url ?? "");
+  if (url.includes("/auth/")) {
+    delete (config.headers as Record<string, unknown>)["X-Impersonate-Tenant-Id"];
+  }
   return config;
 });
 
