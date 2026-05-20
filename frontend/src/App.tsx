@@ -1,41 +1,71 @@
+import { Suspense, lazy } from "react";
 import { Navigate, Route, Routes } from "react-router-dom";
 
 import { NlpAssistantBubble } from "./components/NlpAssistantBubble";
 import { RequireAuth } from "./components/RequireAuth";
 import { AppShell } from "./layout/AppShell";
-import AdminPage from "./pages/Admin";
-import { AiAnalysisPage } from "./pages/AiAnalysis";
-import { DashboardPage } from "./pages/Dashboard";
-import { FinancePage } from "./pages/Finance";
-import { HrPage } from "./pages/Hr";
-import LoginPage from "./pages/Login";
-import { SalesPage } from "./pages/Sales";
-import SignupPage from "./pages/Signup";
-import { StockPage } from "./pages/Stock";
+
+// Lazy-loaded pages — each gets its own JS chunk
+const LoginPage      = lazy(() => import("./pages/Login"));
+const SignupPage      = lazy(() => import("./pages/Signup"));
+const OnboardingPage  = lazy(() => import("./pages/Onboarding"));
+const DashboardPage   = lazy(() => import("./pages/Dashboard").then((m) => ({ default: m.DashboardPage })));
+const SalesPage       = lazy(() => import("./pages/Sales").then((m) => ({ default: m.SalesPage })));
+const StockPage       = lazy(() => import("./pages/Stock").then((m) => ({ default: m.StockPage })));
+const FinancePage     = lazy(() => import("./pages/Finance").then((m) => ({ default: m.FinancePage })));
+const CustomersPage   = lazy(() => import("./pages/Customers").then((m) => ({ default: m.CustomersPage })));
+const SuppliersPage   = lazy(() => import("./pages/Suppliers").then((m) => ({ default: m.SuppliersPage })));
+const OrdersPage      = lazy(() => import("./pages/Orders").then((m) => ({ default: m.OrdersPage })));
+const AiAnalysisPage  = lazy(() => import("./pages/AiAnalysis").then((m) => ({ default: m.AiAnalysisPage })));
+const HrPage          = lazy(() => import("./pages/Hr").then((m) => ({ default: m.HrPage })));
+const SettingsPage    = lazy(() => import("./pages/Settings"));
+const AdminPage       = lazy(() => import("./pages/Admin"));
+
+function PageFallback() {
+  return (
+    <div className="flex min-h-[40vh] items-center justify-center">
+      <div
+        className="h-8 w-8 animate-spin rounded-full border-2 border-slate-200 border-t-violet-600 dark:border-slate-700 dark:border-t-violet-400"
+        role="status"
+        aria-label="Yükleniyor"
+      />
+    </div>
+  );
+}
 
 function App() {
   return (
     <>
-      <Routes>
-        <Route path="/login" element={<LoginPage />} />
-        <Route path="/signup" element={<SignupPage />} />
-        <Route element={<RequireAuth />}>
-          <Route element={<AppShell />}>
-            <Route index element={<Navigate to="/dashboard" replace />} />
-            <Route path="dashboard" element={<DashboardPage />} />
-            <Route path="satis" element={<Navigate to="/sales" replace />} />
-            <Route path="stok" element={<Navigate to="/stock" replace />} />
-            <Route path="finans" element={<Navigate to="/finance" replace />} />
-            <Route path="sales" element={<SalesPage />} />
-            <Route path="stock" element={<StockPage />} />
-            <Route path="finance" element={<FinancePage />} />
-            <Route path="ai" element={<AiAnalysisPage />} />
-            <Route path="hr" element={<HrPage />} />
-            <Route path="admin" element={<AdminPage />} />
+      <Suspense fallback={<PageFallback />}>
+        <Routes>
+          <Route path="/login"  element={<LoginPage />} />
+          <Route path="/signup" element={<SignupPage />} />
+          <Route element={<RequireAuth />}>
+            {/* Onboarding sihirbazi — tam ekran, sidebar yok. */}
+            <Route path="onboarding" element={<OnboardingPage />} />
+
+            {/* Tüm korumalı sayfalar */}
+            <Route element={<AppShell />}>
+              <Route index element={<Navigate to="/dashboard" replace />} />
+              <Route path="dashboard"  element={<DashboardPage />} />
+              <Route path="satis"      element={<Navigate to="/sales"    replace />} />
+              <Route path="stok"       element={<Navigate to="/stock"    replace />} />
+              <Route path="finans"     element={<Navigate to="/finance"  replace />} />
+              <Route path="sales"      element={<SalesPage />} />
+              <Route path="stock"      element={<StockPage />} />
+              <Route path="finance"    element={<FinancePage />} />
+              <Route path="customers"  element={<CustomersPage />} />
+              <Route path="suppliers"  element={<SuppliersPage />} />
+              <Route path="orders"     element={<OrdersPage />} />
+              <Route path="ai"         element={<AiAnalysisPage />} />
+              <Route path="hr"         element={<HrPage />} />
+              <Route path="settings"   element={<SettingsPage />} />
+              <Route path="admin"      element={<AdminPage />} />
+            </Route>
           </Route>
-        </Route>
-        <Route path="*" element={<Navigate to="/" replace />} />
-      </Routes>
+          <Route path="*" element={<Navigate to="/" replace />} />
+        </Routes>
+      </Suspense>
       <NlpAssistantBubble />
     </>
   );
