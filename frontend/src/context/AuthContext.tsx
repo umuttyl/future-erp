@@ -2,7 +2,7 @@ import type { PropsWithChildren } from 'react'
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react'
 
 import { api, getApiErrorMessage, type AuthMe, type SignupOut, type TokenPairOut } from '../lib/api'
-import { clearSession, getAccessToken, getRefreshToken, saveTokens } from '../lib/authSession'
+import { clearSession, getAccessToken, saveTokens } from '../lib/authSession'
 
 type AuthContextValue = {
   user: AuthMe | null
@@ -43,14 +43,18 @@ export function AuthProvider({ children }: PropsWithChildren) {
 
   useEffect(() => {
     let cancelled = false
+    // Access token lives in memory — it's null on every page load.
+    // Attempt a silent refresh using the HttpOnly cookie; if it succeeds we
+    // get a fresh access token and can fetch the current user without any
+    // login prompt.
     ;(async () => {
-      if (!getAccessToken()) {
-        if (!cancelled) setLoading(false)
-        return
-      }
       try {
-        await refreshMe()
+        const { data } = await api.post<TokenPairOut>('/auth/refresh', null, { skipAuth: true })
+        saveTokens(data.access_token, data.refresh_token)
+        const me = await api.get<AuthMe>('/auth/me')
+        if (!cancelled) setUser(me.data)
       } catch {
+        // No valid refresh cookie → not logged in, which is fine.
         clearSession()
         if (!cancelled) setUser(null)
       } finally {
@@ -60,7 +64,8 @@ export function AuthProvider({ children }: PropsWithChildren) {
     return () => {
       cancelled = true
     }
-  }, [refreshMe])
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   const performLogin = useCallback(
     async (input: { tenant_slug: string; email: string; password: string }) => {
@@ -122,13 +127,11 @@ export function AuthProvider({ children }: PropsWithChildren) {
   )
 
   const logout = useCallback(async () => {
-    const rt = getRefreshToken()
     try {
-      if (rt) {
-        await api.post('/auth/logout', { refresh_token: rt }, { skipAuth: true })
-      }
+      // The HttpOnly refresh cookie is sent automatically (withCredentials: true).
+      await api.post('/auth/logout', null, { skipAuth: true })
     } catch {
-      // Sunucu hatası olsa bile oturumu yerelde kapat.
+      // Even if the server call fails, clear the local session.
     } finally {
       clearSession()
       setUser(null)
