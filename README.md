@@ -4,6 +4,8 @@
 
 FastAPI + React 19 tabanlı, katmanlı ERP iskeleti. Detaylı vizyon, mimari kararlar ve kod kuralları için [`AGENTS.md`](AGENTS.md) dosyasına bakın.
 
+> ⚠️ **Geliştirme durumu (2026-05-19):** Proje kapsamlı bir denetimden geçti. **5 production-blocker bug (P0)** ve 8 güvenlik/mimari iyileştirme (P1) tespit edildi. Demo veya deploy yapmadan önce [`PROJECT_AUDIT_REPORT.md`](PROJECT_AUDIT_REPORT.md) raporunu ve [`.cursor/ACTION_PLAN.md`](.cursor/ACTION_PLAN.md) atomik fix planını inceleyin.
+
 ## Tech Stack
 
 | Katman | Teknoloji |
@@ -154,7 +156,37 @@ npm run test:watch    # izleme
 
 ## Geliştirici kuralları
 
-Proje çalışmaya başlamadan önce [`AGENTS.md`](AGENTS.md) ve [`.cursor/rules/`](./.cursor/rules/) dosyalarını okuyun. Kod stili, mimari kararlar, multi-tenant + RBAC kuralları orada.
+Proje çalışmaya başlamadan önce şunları okuyun:
+
+1. **[`AGENTS.md`](AGENTS.md)** — proje vizyonu, stack, mimari kararlar, "asla yapma" kırmızı çizgiler ve §10 "Bilinen sorunlar & audit kararları".
+2. **[`.cursor/rules/`](./.cursor/rules/)** — backend, frontend, security, tests için ayrıntılı standartlar (her audit sonrası güncellenir).
+3. **[`PROJECT_AUDIT_REPORT.md`](PROJECT_AUDIT_REPORT.md)** — son kod denetiminin tam çıktısı; bulgular, öneriler, 6 haftalık yol haritası.
+4. **[`.cursor/ACTION_PLAN.md`](.cursor/ACTION_PLAN.md)** — audit bulgularını **Claude Code'un sırayla uygulayabileceği** atomik fix talimatlarına çevirir; her görev için dosya, satır, before/after kod, test, commit mesajı içerir.
+
+### Geliştirme akışı (yeni sohbet protokolü)
+
+**Audit görevlerine devam etmek için:**
+
+```
+@AGENTS.md, @.cursor/PROGRESS.md ve @.cursor/ACTION_PLAN.md oku.
+ACTION_PLAN içinde `[ ]` olarak işaretli ilk görevi al,
+talimatları uygula, testleri çalıştır, commit at, checkbox'ı `[x]` yap.
+Tek görev bitirip dur, bana onay sor.
+```
+
+### Bilinen kritik sorunlar (özet)
+
+| # | Sorun | Etki | Plan |
+|---|---|---|---|
+| P0-1 | WS multi-tenant veri sızıntısı (`tid` yerine `tenant_id` okunuyor) | **Yüksek**: bildirimler yanlış tenant'a gidiyor | ACTION_PLAN P0-1 |
+| P0-2 | Hayalet tablolar (`finance_records`, `employees`) | Runtime 500 hatası | ACTION_PLAN P0-2 |
+| P0-3 | `stock_movements.quantity_change` ham SQL bug'ı | Anomaly endpoint çöküyor | ACTION_PLAN P0-3 |
+| P0-4 | Sales route'unda ham DB sorgusu (katman ihlali) | Mimari borç | ACTION_PLAN P0-4 |
+| P0-5 | NLP schema prompt'u modellerle drift | LLM hatalı SQL üretiyor | ACTION_PLAN P0-5 |
+| P1-1 | Refresh token localStorage'da (XSS riski) | Güvenlik | ACTION_PLAN P1-1 |
+| P1-* | 7 ek P1 görevi | Güvenlik & mimari | ACTION_PLAN |
+
+Tüm liste için [`PROJECT_AUDIT_REPORT.md`](PROJECT_AUDIT_REPORT.md).
 
 ## Lisans
 

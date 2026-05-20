@@ -13,6 +13,9 @@ from app.core.config import settings
 
 _ph = PasswordHasher()
 
+# Kullanıcı bulunamadığında timing attack'ı önlemek için sabit hash (uygulama başlangıcında hesaplanır).
+DUMMY_HASH: str = _ph.hash("__dummy_password_for_timing_protection__")
+
 
 def hash_password(plain: str) -> str:
     return _ph.hash(plain)

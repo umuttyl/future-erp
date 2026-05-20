@@ -18,5 +18,11 @@ export function RequireAuth() {
     return <Navigate to="/login" replace state={{ from: location.pathname }} />
   }
 
+  // Manager ilk girişte onboarding tamamlanmadıysa wizard'a yönlendir.
+  const isOnboardingRoute = location.pathname === '/onboarding'
+  if (user.role === 'manager' && !user.onboarding_completed && !isOnboardingRoute) {
+    return <Navigate to="/onboarding" replace />
+  }
+
   return <Outlet />
 }

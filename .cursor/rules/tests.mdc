@@ -1,17 +1,20 @@
 ---
-description: Test yazim standartlari (pytest + Vitest)
+description: Test yazim standartlari (pytest + Vitest) — audit 2026-05-19 sonrasi
 globs: tests/**/*.py, frontend/src/**/*.test.{ts,tsx}
 alwaysApply: false
 ---
 
-# Test Kurallari
+# Test Kuralları
+
+> **Audit (2026-05-19):** Multi-tenant izolasyon testi en kritik eksiklik. Bu dosyaya örnek + fixture şablonu eklendi. ACTION_PLAN P1-8.
 
 ## Backend (pytest)
-- Test dosyasi `tests/` altinda, `test_*.py` adlandirmasi.
-- Fixture'lar `tests/conftest.py` icinde paylasilan.
-- Gelistirme bagimliligi: `requirements-dev.txt` (`pytest`, `httpx`).
-- DB testi: `tests/conftest.py` ile in-memory SQLite (`StaticPool` + `Base.metadata.create_all`). Production'a baglanma; testler dosya SQLite `.env`'e yazmaz (`get_db` override).
-- `factory_boy` ile test verisi (`ProductFactory`, `UserFactory`).
+
+- Test dosyası `tests/` altında, `test_*.py` adlandırması.
+- Fixture'lar `tests/conftest.py` içinde paylaşılan.
+- Geliştirme bağımlılığı: `requirements-dev.txt` (`pytest`, `httpx`).
+- DB testi: `tests/conftest.py` ile in-memory SQLite (`StaticPool` + `Base.metadata.create_all`).
+- **Production'a bağlanma**; testler dosya SQLite `.env`'e yazmaz (`get_db` override).
 
 ```python
 # tests/conftest.py
@@ -19,36 +22,212 @@ alwaysApply: false
 def client(db_session):
     app.dependency_overrides[get_db] = lambda: db_session
     return TestClient(app)
-
-# tests/test_products.py
-def test_list_products_filtered_by_tenant(client, tenant_a, tenant_b):
-    ProductFactory.create_batch(3, tenant=tenant_a)
-    ProductFactory.create_batch(2, tenant=tenant_b)
-
-    resp = client.get("/api/products", headers=auth_for(tenant_a))
-    assert len(resp.json()) == 3  # tenant_b urunlerini gormemeli
 ```
 
-## Multi-tenant testi (KRITIK)
-- Her endpoint icin "baska tenant'in verisini goremez" testi YAZ.
-- RBAC: izinsiz role 403 alir testi.
+## Multi-tenant izolasyon testi (ZORUNLU)
+
+> **Her tenant-scoped endpoint için "başka tenant'ın verisini göremez" testi yaz.** Bu, projenin ana savunma hattı.
+
+### Fixture şablonu (`tests/conftest.py`'a ekle)
+
+```python
+from typing import Callable
+from app.core.deps import AuthPrincipal, get_current_principal
+from app.models.user import User
+
+@pytest.fixture
+def client_for(db_session) -> Callable[[User], TestClient]:
+    """Verilen kullanıcı için TestClient üretir (principal override)."""
+    def _factory(user: User) -> TestClient:
+        app_inst = create_app()
+        principal = AuthPrincipal(
+            user_id=user.id,
+            tenant_id=user.tenant_id,
+            email=user.email,
+            role=user.role,
+        )
+        app_inst.dependency_overrides[get_db] = lambda: db_session
+        app_inst.dependency_overrides[get_current_principal] = lambda: principal
+        return TestClient(app_inst)
+    return _factory
+```
+
+### İzolasyon test şablonu (`tests/test_tenant_isolation.py`)
+
+```python
+"""Çapraz-tenant veri sızıntısı testleri."""
+import pytest
+from decimal import Decimal
+from app.models.product import Product
+from app.models.tenant import Tenant
+from app.models.user import User
+from app.core.security import hash_password
+
+
+@pytest.fixture
+def two_tenants_with_data(db_session):
+    t1 = Tenant(name="Tenant 1", slug="t1")
+    t2 = Tenant(name="Tenant 2", slug="t2")
+    db_session.add_all([t1, t2]); db_session.flush()
+    u1 = User(tenant_id=t1.id, email="a@a.com", password_hash=hash_password("X"),
+              role="admin", is_active=True)
+    u2 = User(tenant_id=t2.id, email="b@b.com", password_hash=hash_password("X"),
+              role="admin", is_active=True)
+    p1 = Product(tenant_id=t1.id, sku="T1-A", name="t1-ürün", unit_price=Decimal("1"))
+    p2 = Product(tenant_id=t2.id, sku="T2-A", name="t2-ürün", unit_price=Decimal("1"))
+    db_session.add_all([u1, u2, p1, p2]); db_session.flush()
+    return {"t1": t1, "t2": t2, "u1": u1, "u2": u2, "p1": p1, "p2": p2}
+
+
+@pytest.mark.parametrize("path", [
+    "/api/products",
+    "/api/customers",
+    "/api/suppliers",
+    "/api/sales/records",
+    "/api/inventory/orders",
+])
+def test_endpoint_returns_only_own_tenant_data(client_for, two_tenants_with_data, path):
+    """Tenant 1 olarak listele; dönen verinin hepsi tenant 1'e ait olmalı."""
+    data = two_tenants_with_data
+    client = client_for(data["u1"])
+    resp = client.get(path)
+    assert resp.status_code in (200, 404)
+    if resp.status_code == 200:
+        for row in resp.json():
+            if "tenant_id" in row:
+                assert row["tenant_id"] == data["t1"].id, f"{path} sızıntı: tenant_id={row['tenant_id']}"
+
+
+def test_get_other_tenant_resource_by_id_returns_404(client_for, two_tenants_with_data):
+    """Tenant 1, tenant 2'nin ürün ID'sini sorgularsa 404 almalı (200 değil)."""
+    data = two_tenants_with_data
+    client = client_for(data["u1"])
+    resp = client.get(f"/api/products/{data['p2'].id}")
+    assert resp.status_code == 404
+```
+
+### RBAC testi
+
+```python
+def test_employee_cannot_delete_product(client_employee, db_session, test_tenant):
+    """Employee rolü ürün silemez (403)."""
+    p = Product(tenant_id=test_tenant.id, sku="X", name="X", unit_price=Decimal("1"))
+    db_session.add(p); db_session.flush()
+    resp = client_employee.delete(f"/api/products/{p.id}")
+    assert resp.status_code == 403
+```
+
+## NLP / SQL validator testleri
+
+LLM'in ürettiği SQL'in güvenli olduğunu doğrulamak için:
+
+```python
+def test_validate_sql_rejects_column_named_delete():
+    """'deletion_at' kolon adı keyword-match nedeniyle reddedilmemeli."""
+    from app.services.nlp_assistant import _validate_sql
+    sql = "SELECT id, deletion_at FROM products WHERE tenant_id = :tid LIMIT 5"
+    _validate_sql(sql, allowed_tables={"products"})  # exception atmaz
+
+def test_validate_sql_rejects_insert(...):
+    with pytest.raises(UnsafeSQL):
+        _validate_sql("INSERT INTO products ...", allowed_tables={"products"})
+
+def test_validate_sql_rejects_two_statements(...):
+    with pytest.raises(UnsafeSQL):
+        _validate_sql("SELECT 1; SELECT 2", allowed_tables=set())
+
+def test_validate_sql_requires_tid_when_not_admin(...):
+    with pytest.raises(UnsafeSQL):
+        _validate_sql("SELECT id FROM products", allowed_tables={"products"}, cross_tenant=False)
+```
+
+## Schema-model drift testi
+
+NLP prompt'undaki schema, gerçek modellerle uyumlu olmalı:
+
+```python
+def test_nlp_schema_doc_matches_models():
+    from app.models.base import Base
+    from app.services._schema_doc import build_nlp_schema_doc
+    doc = build_nlp_schema_doc(Base.metadata)
+    # Hayalet tablolar yok:
+    assert "finance_records" not in doc
+    assert "employees" not in doc
+    # Gerçek kolonlar var:
+    assert "change" in doc          # stock_movements.change (quantity_change DEĞİL)
+    assert "customer_type" in doc   # customers.customer_type (city DEĞİL)
+    assert "contact_person" in doc  # suppliers.contact_person (contact_name DEĞİL)
+    # Yanlış kolonlar yok:
+    assert "quantity_change" not in doc
+    assert "contact_name" not in doc
+```
+
+## WebSocket testleri
+
+```python
+def test_ws_uses_tid_claim_not_tenant_id(db_session, test_tenant, test_admin):
+    """JWT 'tid' claim'i okunmalı; 'tenant_id' fallback yok."""
+    from app.core.security import create_access_token, decode_access_token
+    token = create_access_token(
+        user_id=test_admin.id, tenant_id=test_tenant.id,
+        role="admin", email=test_admin.email,
+    )
+    payload = decode_access_token(token)
+    assert payload["tid"] == test_tenant.id
+    assert "tenant_id" not in payload  # eski yanlış key yok
+
+def test_ws_rejects_token_without_tid(monkeypatch):
+    """Manuel tid'siz token üret → WS handshake reddetmeli."""
+    import jwt as jwtlib
+    from app.core.config import settings
+    bad_token = jwtlib.encode(
+        {"sub": "1", "role": "admin", "typ": "access", "exp": 9999999999},
+        settings.JWT_SECRET_KEY, algorithm=settings.JWT_ALGORITHM
+    )
+    # TestClient WS:
+    from starlette.testclient import TestClient
+    from app.main import app
+    with TestClient(app) as tc:
+        with pytest.raises(Exception):  # WebSocketDisconnect veya 1008
+            with tc.websocket_connect(f"/api/ws/notifications?access_token={bad_token}"):
+                pass
+```
 
 ## Frontend (Vitest)
-- `vitest.config.ts` ile `vite.config.ts` ayri (`mergeConfig`); `npm run build` icin `vite.config.ts`'de `test` alani kullanma.
-- `*.test.tsx` component'in yaninda.
+
+- `vitest.config.ts` ile `vite.config.ts` ayrı (`mergeConfig`).
+- `*.test.tsx` component'in yanında.
 - React Testing Library kullan.
 - API'yi mock'la (`msw` veya `vi.mock`).
-- Snapshot test'ten kacin; behavior test yaz.
+- Snapshot test'ten kaçın; behavior test yaz.
 
 ## Async test
+
 - `pytest-asyncio` ile `@pytest.mark.asyncio`.
 - Async client: `httpx.AsyncClient`.
 
 ## Coverage
-- Hedef: kritik modullerde (auth, RBAC, finance) %80+.
-- 100 zorla degil; degerli testler yaz.
+
+- Hedef: kritik modüllerde (auth, RBAC, finance, multi-tenant) **%80+**.
+- Hayalet tablo / column drift testi **zorunlu** (regression).
+- 100 zorla değil; **değerli** testler yaz.
 
 ## Asla yapma
-- Production DB'ye baglanan test.
+
+- Production DB'ye bağlanan test.
 - Sleep'li flaky test (event-based bekle).
-- Test'te hardcoded date (`datetime.now()` mock'la veya `freezegun`).
+- Test'te hardcoded `datetime.now()` — mock'la veya `freezegun`.
+- Test'te gerçek API key (Gemini/OpenAI) kullan — mock veya skip.
+- `db.commit()` test fixture'ında — `db.flush()` + outer transaction rollback.
+- Test sırasında `lifespan` background task'ları çalıştırma (`anomaly_simulation_loop` event loop'u meşgul eder); `ENV=test` ile bastır.
+
+## CI hedefi
+
+`.github/workflows/ci.yml` (P2-7):
+
+```yaml
+- run: pip install -r requirements.txt -r requirements-dev.txt
+- run: alembic upgrade head  # in-memory değil, dosya SQLite OK
+- run: pytest --cov=app --cov-report=term-missing
+- run: cd frontend && npm ci && npm run lint && npm run test && npm run build
+```

@@ -1,20 +1,18 @@
 ---
-description: Auth, RBAC, multi-tenant, secrets - kirmizi cizgiler
+description: Auth, RBAC, multi-tenant, secrets - kirmizi cizgiler (audit 2026-05-19 sonrasi)
 alwaysApply: true
 ---
 
-# Guvenlik Kurallari (HER ZAMAN GECERLI)
+# Güvenlik Kuralları (HER ZAMAN GEÇERLİ)
 
-## Multi-tenant izolasyon (KRITIK)
+> **Audit (2026-05-19):** Kritik bug'lar bu dosyaya pin'lendi. Mevcut ihlaller için `.cursor/ACTION_PLAN.md` P0/P1 görevleri.
+
+## Multi-tenant izolasyon (KRİTİK)
+
 - Her domain sorgusunda `tenant_id` filtresi olmak ZORUNDA.
-- Tenant_id'siz `SELECT` = veri sizintisi = veri ihlali.
-- Service base sinifindan turet: `TenantScopedService`.
+- Tenant_id'siz `SELECT` = veri sızıntısı = veri ihlali.
+- Service base sınıfından türet: `TenantScopedService` (`app/services/_base.py` — P1-2).
 - Yeni model eklerken `tenant_id: Mapped[int] = mapped_column(ForeignKey("tenants.id"), index=True)` ekle.
-
-## RBAC
-- Korumali endpoint: `Depends(require_permission("module.action"))`.
-- Izin matrisi: `app/core/permissions.py` (Faz 1).
-- "Bu kullanici tum verilere erisebilir mi?" sorusunu HER zaman sor.
 
 ```python
 # BAD
@@ -25,36 +23,245 @@ def delete(id: int, svc: CustomerService = Depends()):
 # GOOD
 @router.delete("/customers/{id}",
     dependencies=[Depends(require_permission("crm.customer.delete"))])
-def delete(id: int, svc: CustomerService = Depends(),
-           ctx: TenantCtx = Depends(get_tenant_ctx)):
-    svc.delete(id, ctx)
+def delete(
+    id: int,
+    svc: CustomerService = Depends(),
+    ctx: TenantContext = Depends(get_tenant_ctx),
+):
+    svc.delete(id, ctx.tenant_id)
 ```
 
-## Secrets
-- `.env` ASLA commit edilmez (`.gitignore` zaten korur).
-- Sadece `.env.example` git'e gider, gercek deger ICINDE YOK.
-- API key'i kod icinde hardcode YASAK.
-- Settings sinifi (`app/core/config.py`) `pydantic-settings` ile env okur.
+**Multi-tenant test zorunlu:** Her endpoint için "başka tenant'ı göremez" testi yaz (`tests/test_tenant_isolation.py`). Bkz. `.cursor/rules/tests.mdc`.
 
-## Sifreler
-- Argon2 hash (bcrypt degil).
-- Plain text sifreyi log'a, response'a, exception mesajina YAZMA.
-- Sifre minimum: 8 karakter, 1 rakam, 1 buyuk harf (Faz 1'de zorlanir).
+## JWT claim adları
+
+JWT payload **tek doğru kaynak** `app/core/security.py:create_access_token`:
+
+```python
+payload = {
+    "sub": str(user_id),
+    "tid": tenant_id,    # ← tenant_id'nin adı bu
+    "role": role,
+    "email": email,
+    "typ": "access",
+    ...
+}
+```
+
+**Tüketim noktalarında kural:**
+
+```python
+# BAD — sessizce None döner, fallback başkasına eşitler
+tenant_id = int(payload.get("tenant_id") or 1)  # ❌ KIRIK
+
+# GOOD — doğru claim adı, fallback yok
+tid_raw = payload.get("tid")
+if tid_raw is None:
+    raise UnauthorizedException("Tenant kimliği yok.")
+tenant_id = int(tid_raw)
+if tenant_id <= 0:
+    raise UnauthorizedException("Geçersiz tenant kimliği.")
+```
+
+**Gerçek case:** `app/api/routes/ws_notifications.py:35` `tenant_id` okuyor → her WS bağlantısı admin tenant (id=1) fallback'ine düşüyor → **veri sızıntısı**. ACTION_PLAN P0-1.
+
+**Detection:**
+```powershell
+# WS/auth dosyalarinda yanlis claim adi var mi?
+Select-String -Path app -Pattern 'payload\.get\(["`'']tenant_id' -Recurse
+```
+
+## WebSocket güvenliği
+
+- **Token kaynağı:** Dev'de URL query string (`?access_token=...`) kabul edilebilir. **Production'a çıkmadan önce** WS subprotocol veya kısa-ömürlü WS ticket'a geç. URL query string sunucu logu / proxy logu / browser history'sinde sızar.
+- **Handshake'de doğrulama zorunlu:**
+  - Token decode (`decode_access_token`).
+  - `typ == "access"` kontrolü.
+  - `tid` claim'i mevcut + pozitif int.
+  - Permission kontrolü (`role_has_permission(role, AI_INSIGHTS_READ)`).
+- **Connection state tenant_id ile scope'lanmalı.** Hiçbir broadcast tenant filtresi atlayamaz.
+- **Token refresh sonrası WS yeniden bağlanmalı.** Frontend tarafında handler şart.
+
+## Secrets
+
+- `.env` ASLA commit edilmez (`.gitignore` zaten korur).
+- Sadece `.env.example` git'e gider, gerçek değer İÇİNDE YOK.
+- API key'i kod içinde hardcode YASAK.
+- Settings sınıfı (`app/core/config.py`) `pydantic-settings` ile env okur.
+- **`JWT_SECRET_KEY` production'da:** 48+ karakter, default değer değil (`_validate_jwt_secret` zorlar).
+- **`settings.is_production` property** kullan — `ENV` "prod" ve "production" ikisini kabul eder (P1-7).
+
+## Şifreler
+
+- Argon2 hash (`PasswordHasher`), bcrypt değil.
+- `DUMMY_HASH` timing attack koruması — kullanıcı bulunamasa bile hash doğrulanır (`auth_service.login`).
+- Plain text şifreyi log'a, response'a, exception mesajına YAZMA.
+- Şifre politikası: min 8 karakter + 1 büyük + 1 rakam (`_password_strength`).
+- **Faz 2'de sıkılaştır:** 12 karakter min, özel karakter, HIBP / common-passwords kontrolü, signup captcha.
 
 ## Token
-- Access JWT 15 dk, refresh 7 gun.
-- Refresh token DB'de hash'li sakla (rotasyon icin).
-- Logout = refresh token'i invalid et.
+
+- Access JWT 15 dk, refresh 7 gün (`settings.JWT_ACCESS_EXPIRE_MINUTES/_REFRESH_EXPIRE_DAYS`).
+- Refresh token DB'de **hash'li** saklanır (`hashlib.sha256`, `RefreshToken.token_hash`).
+- Replay attack önlemi: `used_at` set ise ikinci kullanım reddedilir + `revoked_at` set edilir (`auth_service.refresh`).
+- Logout = refresh token'ı `revoked_at = now` ile invalid et.
+
+### Token storage (frontend)
+
+```typescript
+// BAD — XSS riskli
+localStorage.setItem("future_erp_access_token", token)
+localStorage.setItem("future_erp_refresh_token", refresh)
+
+// GOOD — access bellek, refresh HttpOnly cookie
+let _access: string | null = null  // modül scope
+export function getAccessToken() { return _access }
+export function saveAccessToken(t: string) { _access = t }
+
+// refresh token: backend Set-Cookie ile HttpOnly + Secure + SameSite=Lax
+// Frontend bu cookie'yi görmez; sadece /auth/refresh çağrısı cookie'yi gönderir
+```
+
+**Backend tarafı (`app/api/routes/auth.py`):**
+```python
+response.set_cookie(
+    key="future_erp_refresh",
+    value=refresh,
+    httponly=True,
+    secure=settings.is_production,
+    samesite="lax",
+    max_age=settings.JWT_REFRESH_EXPIRE_DAYS * 86400,
+    path="/api/auth",
+)
+```
+
+**Axios:** `withCredentials: true` (cookie göndermek için).
+
+**Gerçek case:** `frontend/src/lib/authSession.ts` localStorage kullanıyor — ACTION_PLAN P1-1.
 
 ## Loglama
+
 - PII (e-posta, T.C. kimlik, telefon, IP, kart no) log'a YAZMA.
-- Token, sifre, secret log'a YAZMA.
-- Hassas alan goruluyorsa `***` maskele.
+- Token, şifre, secret log'a YAZMA.
+- Hassas alan görülürse `***` maskele.
+- Audit log ayrı tablo (`audit_logs`) — admin impersonation, kullanıcı silme, rol değiştirme, fiyat değiştirme (P1-4).
 
 ## SQL injection
-- ORM kullan, ham SQL'den kacin.
-- Mecbur kalirsan parametreli sorgu (`:param`), string concat YASAK.
 
-## CORS / CSRF
-- Production'da CORS allow_origins kisitli (sadece bilinen domain).
-- Cookie kullanilirsa `Secure`, `HttpOnly`, `SameSite=Lax`.
+- ORM kullan, ham SQL'den kaçın.
+- Mecbur kalırsan parametreli sorgu (`text("... :param")`), string concat YASAK.
+
+## NLP SQL validator
+
+LLM'in ürettiği SQL'i çalıştırmadan önce `_validate_sql` ile doğrula. Kurallar:
+
+1. **AST tabanlı kontrol** (keyword string-match değil):
+```python
+# BAD — kolon adi 'deletion_at' false-positive uretir
+if any(k in sql.upper() for k in ("DELETE", "DROP", ...)):
+    raise UnsafeSQL(...)
+
+# GOOD — sqlglot AST
+import sqlglot
+from sqlglot import expressions as sgexp
+expr = sqlglot.parse_one(sql, read=_sqlglot_dialect())
+if not isinstance(expr, sgexp.Select):
+    raise UnsafeSQL("Yalnizca SELECT izinli.")
+if any(expr.find(node) for node in (sgexp.Insert, sgexp.Update, sgexp.Delete, sgexp.Drop)):
+    raise UnsafeSQL("DML/DDL tespit edildi.")
+```
+
+2. **Dialect DB'ye göre:** SQLite dev'de `read="sqlite"`, Postgres prod'da `read="postgres"`. Hardcoded `"postgres"` (mevcut bug) parser uyumsuzluğu üretir.
+
+3. **Tablo whitelist'i** `nlp_table_whitelist(include_admin=...)` üzerinden — admin için `tenants`, `users` ek, diğer roller için sadece domain tabloları.
+
+4. **Tenant filtresi:** Admin değilse `:tid` bind parametresi şart. Admin için bile **audit log'a** ne çalıştırıldığını yaz (`AuditLog(action="nlp.cross_tenant_query", payload={"sql": sql})`).
+
+5. **Yorum reddi:** `--`, `/*`, `*/`, satır başında `#` reddedilir.
+
+6. **Tek statement:** `sqlglot.parse(sql)` len == 1 olmalı.
+
+**Gerçek case:** `app/services/nlp_assistant.py:_validate_sql` keyword string-match + sqlglot dialect mismatch — ACTION_PLAN P1-3.
+
+## NLP schema documentation
+
+LLM prompt'unda tablo/kolon şeması **`Base.metadata`'dan otomatik üretilmeli** (`app/services/_schema_doc.py`). Manuel yazılan schema modellerle drift olur.
+
+```python
+# BAD — manuel hardcoded
+prompt = """
+Table: customers
+  - id, name, email, city  ← 'city' modelde yok!
+"""
+
+# GOOD — auto-generated
+from app.services._schema_doc import build_nlp_schema_doc
+from app.models.base import Base
+schema_doc = build_nlp_schema_doc(Base.metadata, include_admin=is_admin)
+prompt = f"... Schema:\n\n{schema_doc}\n ..."
+```
+
+**Gerçek case:** `app/services/nlp_assistant.py:_unified_nlp_system_prompt` `customers.city`, `suppliers.contact_name`, `stock_movements.quantity_change` gibi yanlış kolonlar — ACTION_PLAN P0-5.
+
+## Admin impersonation
+
+`get_tenant` dep'i admin'e `X-Impersonate-Tenant-Id` header'ı ile başka tenant'a girme izni verir. **Her impersonation `audit_logs` tablosuna yazılmalı** (P1-4).
+
+```python
+# app/core/deps.py
+if principal.role == "admin" and hdr:
+    if int(hdr) != principal.tenant_id:
+        # ZORUNLU: audit
+        db.add(AuditLog(
+            actor_tenant_id=principal.tenant_id,
+            actor_user_id=principal.user_id,
+            action="admin.impersonate_tenant",
+            target_tenant_id=int(hdr),
+            payload={"method": request.method, "path": request.url.path},
+        ))
+        db.commit()
+```
+
+## CORS / CSRF / Headers
+
+- **Production'da `allow_origins`** kısıtlı (env'den, sadece bilinen domain).
+- `allow_credentials=True` + cookie kullanılıyorsa CSRF saldırı yüzeyi var → `SameSite=Lax` minimum savunma.
+- Eksik header'lar (eklenecek — P2):
+  - `Content-Security-Policy`
+  - `X-Frame-Options: DENY`
+  - `Referrer-Policy: no-referrer`
+  - `Strict-Transport-Security: max-age=63072000; includeSubDomains`
+
+## Rate limit
+
+`slowapi` + decorator:
+- `/auth/login` — 5/min
+- `/auth/register`, `/auth/signup` — 3/min
+- `/auth/refresh` — 10/min
+- `/nlp/query`, `/chat` — 20/min
+
+`key_func=get_remote_address` proxy arkasında çalışmaz — production'da `X-Forwarded-For` parse eden custom key_func, ya da kullanıcı/tenant başına limit.
+
+## ENV bayrağı
+
+Sınıf seviyesinde tek doğru kaynak:
+
+```python
+# app/core/config.py
+@property
+def is_production(self) -> bool:
+    return self.ENV.lower() in ("prod", "production")
+```
+
+Tüm kontroller `settings.is_production` ile yapılır. String karşılaştırması (`ENV == "prod"` vs `ENV == "production"`) farklı dosyalarda farklı sonuç verir.
+
+## "Asla yapma" hızlı liste
+
+1. `payload.get("tenant_id")` — doğrusu `payload.get("tid")` (JWT claim adı).
+2. Refresh/access token'ı `localStorage`'a koyma.
+3. NLP `_validate_sql`'de `if keyword in sql.upper()`.
+4. NLP schema'sını LLM prompt'una hardcoded yazma.
+5. Admin impersonation'ı log'lamadan yapma.
+6. `ENV == "prod"` veya `ENV == "production"` — `settings.is_production` kullan.
+7. `tenant_id` filtresi olmadan SQL veya ORM sorgusu.
+8. Şifre / token / PII'yi log'a düşürme.

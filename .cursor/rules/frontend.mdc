@@ -1,14 +1,17 @@
 ---
-description: React 19 + TypeScript + Tailwind frontend standartlari
+description: React 19 + TypeScript + Tailwind frontend standartlari (audit 2026-05-19 sonrasi)
 globs: frontend/**/*.{ts,tsx}
 alwaysApply: false
 ---
 
-# Frontend Kurallari
+# Frontend Kuralları
 
-## API cagrisi
-- TUM API cagrilari `frontend/src/lib/api.ts` uzerinden.
-- Component icinde `fetch` veya `axios` YASAK.
+> **Audit (2026-05-19):** Token storage, state management, code splitting bölümleri güçlendirildi. Detay: `PROJECT_AUDIT_REPORT.md` §5. Görevler: `.cursor/ACTION_PLAN.md` P1-1, P2-1..P2-5.
+
+## API çağrısı
+
+- TÜM API çağrıları `frontend/src/lib/api.ts` üzerinden.
+- Component içinde `fetch` veya `axios` YASAK.
 
 ```tsx
 // BAD
@@ -19,32 +22,153 @@ import { api } from '@/lib/api'
 const data = await api.products.list()
 ```
 
+- `axios.create({ baseURL: '/api', withCredentials: true })` — cookie refresh için `withCredentials` şart (P1-1 sonrası).
+- Tip safety: response tipi `lib/api.ts`'te merkezi `type Product = { ... }` olarak tanımlanır. Backend Pydantic şemasından `openapi-typescript` ile üretilse daha iyi (P2 hedefi).
+
 ## Component pattern
+
 - Function component + named export.
-- `default export` sadece sayfa dosyalarinda (`pages/`).
-- Bir dosyada bir component (paylasilan kucuk parcalar haric).
+- `default export` SADECE sayfa dosyalarında (`pages/`).
+- Bir dosyada bir component (paylaşılan küçük parçalar hariç).
+- **500 satırı geçen component'i parçala.** Dashboard.tsx 543 satır — refactor P2-1.
 
 ## TypeScript
-- `tsconfig` strict acik kalmali, kapama.
+
+- `tsconfig` strict açık kalmalı, kapama.
 - `any` YASAK. Bilmiyorsan `unknown` + type guard.
-- Props icin ayri `interface` veya `type`.
+- Props için ayrı `interface` veya `type`.
+- **TypeScript sürümü stabil 5.x olmalı.** `package.json:typescript` "~6.0.2" gibi var olmayan bir sürüm yazılırsa `npm install` patlar veya yanlış sürüm çeker (P2-4).
 
-## State
+## State management
+
 - Yerel: `useState`, `useReducer`.
-- Paylasimli: Context. Redux/Zustand yok (gerekince eklenir).
-- Server cache: simdilik manuel; ileride React Query gelebilir.
+- Paylaşımlı: Context (Auth, Theme).
+- **Server cache: React Query (TanStack Query) zorunlu** (P2-1 sonrası).
+  - Manuel `useEffect` + `useState` ile `axios.get` çalışma şekli `Dashboard.tsx`'te 6 paralel istek üretiyor, hiçbiri cache'lenmiyor.
+- Redux/Zustand yok (gerekince eklenir).
 
-## Tailwind
-- Class isimleri Prettier plugin ile sirali.
-- Arbitrary value (`w-[373px]`) sadece zorunluysa, design system tercih.
-- Dark mode default (`bg-slate-950` paleti).
+```tsx
+// BAD — useEffect manuel cache
+useEffect(() => {
+  api.get('/products').then((r) => setProducts(r.data))
+}, [])
+
+// GOOD — React Query
+const { data: products, isLoading } = useQuery({
+  queryKey: ['products'],
+  queryFn: () => api.get<Product[]>('/products').then(r => r.data),
+})
+```
+
+## Token storage
+
+```typescript
+// BAD — localStorage XSS riskli
+localStorage.setItem('future_erp_access_token', token)
+
+// GOOD — access bellek (modül scope), refresh HttpOnly cookie
+let _access: string | null = null
+export const getAccessToken = () => _access
+export const saveAccessToken = (t: string) => { _access = t }
+// Refresh: backend Set-Cookie ile gelir; frontend görmez,
+// /auth/refresh çağrısında otomatik gönderilir (withCredentials)
+```
+
+**Gerçek case:** `frontend/src/lib/authSession.ts` localStorage kullanıyor — ACTION_PLAN P1-1.
 
 ## Routing
+
 - `react-router` 7.
-- Route tanimlari `App.tsx`'te.
-- Korumali route: `<ProtectedRoute role="manager">` (Faz 1).
+- Route tanımları `App.tsx`'te.
+- Korumalı route: `<RequireAuth>` (mevcut).
+- **Code splitting + lazy loading** (P2-2):
+
+```tsx
+// BAD — tüm sayfalar statik import → ilk yüklemede 1MB+ JS
+import AdminPage from './pages/Admin'
+
+// GOOD — lazy + Suspense
+const AdminPage = lazy(() => import('./pages/Admin'))
+<Suspense fallback={<LoadingState />}>
+  <Routes>...</Routes>
+</Suspense>
+```
+
+## Error handling
+
+- Root'a `<ErrorBoundary fallback={<AppErrorPage />}>` koy (P2-5).
+- API hatasını `getApiErrorMessage(error, fallback)` ile Türkçe mesaja çevir.
+- Field-level hata için backend `{error: {code, message, details}}` içindeki `details` array'i form alanlarına bağla.
+
+## Loading states
+
+Tek standart `<LoadingState />` veya `<Skeleton />` component'i:
+
+```tsx
+// BAD — üç farklı kalıp
+{loading && <div>Yükleniyor…</div>}
+{loading && <SkeletonKpiGrid />}
+{loading ? null : <Content />}
+
+// GOOD — tek pattern
+{isLoading ? <Skeleton variant="kpi-grid" /> : <Content />}
+```
+
+## Tailwind
+
+- Class isimleri Prettier plugin ile sıralı.
+- Arbitrary value (`w-[373px]`) sadece zorunluysa, design system tercih.
+- Dark mode default (`bg-slate-950` paleti).
+- **Tekrar eden uzun class kombinasyonlarını `<Card>`, `<Button>` gibi component'lere çıkar.**
+
+## WebSocket
+
+- Connect: access token query parametresi (dev). Production'da WS subprotocol veya kısa-ömürlü ticket.
+- **Token refresh sonrası WS yeniden bağlanmalı.** `wsNotifications.ts` içine handler ekle.
+- Mute tercihi şu an `localStorage` — backend'e taşı (P2 — bildirim merkezi backend persistence).
 
 ## i18n
-- Kullaniciya gosterilen mesaj **Turkce**.
-- Kod / identifier / yorum **Ingilizce**.
+
+- Kullanıcıya gösterilen mesaj **Türkçe**.
+- Kod / identifier / yorum **İngilizce**.
 - `tr-TR` locale: tarih `Intl.DateTimeFormat('tr-TR')`, para `Intl.NumberFormat('tr-TR', {style:'currency', currency:'TRY'})`.
+- Tüm UI metinleri hardcoded; ileride çoklu dil için `react-i18next` (P2 hedefi).
+
+## Accessibility
+
+- Tıklanabilir element `<button>` veya `<Link>`, **asla `<div onClick>`**.
+- Form input'larında `aria-describedby` ile error mesaj bağla.
+- Renk kontrastı WCAG AA (Lighthouse audit ile doğrula).
+- Modal/Toast'larda focus trap.
+- Touch target min 44x44px (mobile).
+
+## Mobile responsive
+
+- Mobile-first yaklaşım: önce `flex-col`, sonra `sm:flex-row`.
+- Tablolar: mobile'da **card view** alternatifi (`overflow-x-auto` tek başına yetmez).
+- Sidebar: mobile'da hamburger menu + drawer.
+
+## Production build
+
+- `vite.config.ts` proxy sadece dev'de. Production build'inde `/api` mutlak URL'ye işaret etmeli:
+
+```ts
+// frontend/src/lib/api.ts
+export const api = axios.create({
+  baseURL: import.meta.env.VITE_API_BASE_URL ?? '/api',
+  withCredentials: true,
+})
+```
+
+- `.env.production` ile `VITE_API_BASE_URL=https://api.future-erp.com`.
+
+## Asla yapma
+
+- `localStorage.setItem` ile token, şifre, PII sakla.
+- `<div onClick>` (a11y kırar).
+- `fetch` veya component içi `axios.get` (lib/api.ts dışı).
+- Snapshot test (behavior test yaz).
+- `any` tipi.
+- Hardcoded API base URL.
+- Default export non-page dosyalarda.
+- Production'da `console.log` (lint ile yakalansın).

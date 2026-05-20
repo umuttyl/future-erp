@@ -1,16 +1,18 @@
-import logging
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, Depends
+import structlog
+from fastapi import APIRouter, Depends, Request
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from app.core.db import get_db
-from app.core.deps import TenantContext, get_tenant_ctx, require_permission
+from app.core.deps import AuthPrincipal, TenantContext, get_current_principal, get_tenant_ctx, require_permission
 from app.core.permissions import NLP_QUERY_EXECUTE
+from app.core.rate_limit import limiter
+from app.models.tenant import Tenant
 from app.services.nlp_assistant import run_nlp_query
 
-logger = logging.getLogger(__name__)
+logger = structlog.get_logger(__name__)
 
 router = APIRouter()
 nlp_chat_api_router = APIRouter()
@@ -76,6 +78,7 @@ def _nlp_query_handler(
     payload: NLQueryRequest,
     ctx: TenantContext,
     db: Session,
+    principal: AuthPrincipal | None = None,
 ) -> NLQueryResponse:
     """200 + NLQueryResponse; beklenmeyen hatalarda 500 yerine düşmeyen mesaj."""
     try:
@@ -83,7 +86,25 @@ def _nlp_query_handler(
             return _friendly_response(
                 "Merhaba! Future ERP AI sistemine hoş geldiniz, size nasıl yardımcı olabilirim?"
             )
-        result = run_nlp_query(db, user_text=payload.text, tenant_id=ctx.tenant_id)
+
+        # Aktif modülleri ve şirket adını tenant'tan al (role-aware SQL whitelist + prompt için)
+        active_modules: list[str] | None = None
+        tenant_name: str = ""
+        user_role = principal.role if principal else "manager"
+        if principal:
+            tenant = db.get(Tenant, principal.tenant_id)
+            if tenant:
+                active_modules = tenant.active_modules
+                tenant_name = tenant.name or ""
+
+        result = run_nlp_query(
+            db,
+            user_text=payload.text,
+            tenant_id=ctx.tenant_id,
+            user_role=user_role,
+            active_modules=active_modules,
+            tenant_name=tenant_name,
+        )
         ch = result.chart_hint
         chart_out: Optional[ChartHint] = None
         if isinstance(ch, dict):
@@ -106,22 +127,26 @@ def _nlp_query_handler(
 
 
 @router.post("/query", response_model=NLQueryResponse)
+@limiter.limit("20/minute")
 def nlp_query(
+    request: Request,
     payload: NLQueryRequest,
     ctx: TenantContext = Depends(get_tenant_ctx),
-    _: object = Depends(require_permission(NLP_QUERY_EXECUTE)),
+    principal: AuthPrincipal = Depends(require_permission(NLP_QUERY_EXECUTE)),
     db: Session = Depends(get_db),
 ):
-    return _nlp_query_handler(payload, ctx, db)
+    return _nlp_query_handler(payload, ctx, db, principal=principal)
 
 
 @nlp_chat_api_router.post("/chat/", response_model=NLQueryResponse, tags=["nlp"], include_in_schema=False)
 @nlp_chat_api_router.post("/chat", response_model=NLQueryResponse, tags=["nlp"])
+@limiter.limit("20/minute")
 def nlp_chat(
+    request: Request,
     payload: NLQueryRequest,
     ctx: TenantContext = Depends(get_tenant_ctx),
-    _: object = Depends(require_permission(NLP_QUERY_EXECUTE)),
+    principal: AuthPrincipal = Depends(require_permission(NLP_QUERY_EXECUTE)),
     db: Session = Depends(get_db),
 ):
-    """POST /api/chat — AI asistan."""
-    return _nlp_query_handler(payload, ctx, db)
+    """POST /api/chat — AI asistan (role-aware)."""
+    return _nlp_query_handler(payload, ctx, db, principal=principal)

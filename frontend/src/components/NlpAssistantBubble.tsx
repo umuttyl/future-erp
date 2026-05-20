@@ -16,7 +16,7 @@ type ChatMessage =
   | { id: string; role: "assistant"; kind: "result"; payload: NlpQueryResponse }
   | { id: string; role: "assistant"; kind: "error"; text: string };
 
-const INTRO_MESSAGE: ChatMessage = {
+const INTRO_MANAGER: ChatMessage = {
   id: "intro",
   role: "assistant",
   kind: "text",
@@ -27,12 +27,25 @@ const INTRO_MESSAGE: ChatMessage = {
     '• "Son 30 günde en çok satış yapan 3 müşteri"',
 };
 
+const INTRO_ADMIN: ChatMessage = {
+  id: "intro",
+  role: "assistant",
+  kind: "text",
+  text:
+    "Merhaba! Platform geneli verilerini sorgulayabilirsin. Örnek:\n" +
+    '• "Kaç aktif şirket var ve hangi sektörlerde?"\n' +
+    '• "Tüm şirketler arasında en yüksek cirolu 5 ürün"\n' +
+    '• "Şirket bazında toplam satış karşılaştırması"',
+};
+
 export function NlpAssistantBubble() {
   const { user, hasPermission } = useAuth();
 
+  const introMessage = user?.role === "admin" ? INTRO_ADMIN : INTRO_MANAGER;
+
   const [open, setOpen] = useState(false);
   const [input, setInput] = useState("");
-  const [messages, setMessages] = useState<ChatMessage[]>([INTRO_MESSAGE]);
+  const [messages, setMessages] = useState<ChatMessage[]>([introMessage]);
   const [busy, setBusy] = useState(false);
   const bottomRef = useRef<HTMLDivElement | null>(null);
 
@@ -121,9 +134,26 @@ export function NlpAssistantBubble() {
                   />
                   AI Asistan
                 </div>
-                <p className="truncate text-[11px] font-medium text-indigo-100/90">
-                  Doğal dilde soru sor
-                </p>
+                <div className="mt-0.5 flex items-center gap-1.5">
+                  <p className="truncate text-[11px] font-medium text-indigo-100/90">
+                    Doğal dilde soru sor
+                  </p>
+                  {user && (
+                    <span className={`shrink-0 rounded-full px-1.5 py-0.5 text-[10px] font-semibold ${
+                      user.role === "admin"
+                        ? "bg-red-400/30 text-red-100"
+                        : user.role === "manager"
+                        ? "bg-emerald-400/30 text-emerald-100"
+                        : "bg-white/20 text-white/80"
+                    }`}>
+                      {user.role === "admin"
+                        ? "Admin • Tam erişim"
+                        : user.role === "manager"
+                        ? "Manager • Şirket verisi"
+                        : "Çalışan • Kısıtlı"}
+                    </span>
+                  )}
+                </div>
               </div>
             </div>
             <button

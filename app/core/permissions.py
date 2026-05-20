@@ -47,6 +47,7 @@ PERMISSION_MATRIX: dict[str, FrozenSet[str]] = {
         {
             CATALOG_PRODUCT_READ,
             CATALOG_PRODUCT_WRITE,
+            CATALOG_PRODUCT_DELETE,
             STOCK_ADJUST,
             SALES_READ,
             SALES_WRITE,
@@ -55,6 +56,10 @@ PERMISSION_MATRIX: dict[str, FrozenSet[str]] = {
             AI_INSIGHTS_READ,
             NLP_QUERY_EXECUTE,
             HR_PERFORMANCE_READ,
+            # Manager kendi tenant'inin ayarlarini yonetebilir:
+            # modul secimi, onboarding, kullanici davet
+            ADMIN_USERS_READ,
+            ADMIN_USERS_WRITE,
         }
     ),
     ROLE_EMPLOYEE: frozenset(
@@ -62,6 +67,7 @@ PERMISSION_MATRIX: dict[str, FrozenSet[str]] = {
             CATALOG_PRODUCT_READ,
             SALES_READ,
             AI_INSIGHTS_READ,
+            NLP_QUERY_EXECUTE,
         }
     ),
 }

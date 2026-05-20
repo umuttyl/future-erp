@@ -148,11 +148,21 @@ Future_Erp/
 2. **`.env` dosyasını commit etme.** Secret'ları log'a düşürme.
 3. **PII (kullanıcı adı, e-posta, T.C. kimlik) log'a yazma.**
 4. **`Base.metadata.create_all(...)`** — sadece test fixture istisnası.
-5. **Route içinde DB sorgusu** — service'e devret.
+5. **Route içinde DB sorgusu** — service'e devret. _(Audit 2026-05-19: `routes/sales.py:daily_sales_analytics` bu kuralı ihlal ediyordu — P0-4 ile düzeltilecek.)_
 6. **Auth/RBAC kodunu testsiz merge etme.**
 7. **Mevcut migration'ı geriye dönük düzenleme** — yeni migration ekle.
 8. **Frontend'de plain `fetch`/`axios`** — `lib/api.ts` zorunlu.
 9. **Türkçe karakter sorunlarını "şimdilik" geçme** — `tr-TR` locale doğru kurulmalı.
+10. **JWT claim adlarını "varsa böyledir" diye okuma** — `create_access_token` `"tid"` yazar; tüketim noktası **mutlaka `payload.get("tid")`** olmalı, `tenant_id` değil. Bkz. `app/core/security.py:40-52`.
+11. **Hayalet tablo referansı** — bir tablo adını ham SQL veya NLP prompt'unda yazmadan önce `app/models/` altında o model var mı doğrula. Aksi halde runtime'da `OperationalError`. _(Audit 2026-05-19: `finance_records`, `employees` referansları → P0-2.)_
+12. **LLM'e hardcoded schema vermek** — NLP prompt'unda tablo/kolon listesi **`Base.metadata`'dan otomatik** üretilmeli. Manuel yazılan schema modellerle drift olur ve LLM hatalı SQL üretir. Bkz. `app/services/_schema_doc.py` (P0-5).
+13. **JWT veya refresh token'ı `localStorage`'a koyma** — XSS riski. Access token bellek (modül scope), refresh token **HttpOnly + Secure + SameSite=Lax cookie**. Bkz. `.cursor/rules/security.mdc`.
+14. **NLP SQL validator'da keyword string-match** — `"DELETE" in sql.upper()` "deletion_at" kolon adında false-positive üretir. AST tabanlı kontrol (`sqlglot.expressions.Delete` vs.) kullan.
+15. **Bir iş akışında birden fazla `db.commit()`** — kısmi başarı = tutarsız DB. Ara `db.flush()`, sonda tek `commit()` (veya `with db.begin():`).
+16. **`_ADMIN_TENANT_ID = 1` gibi magic number kullanma** — admin tespiti rol veya `Tenant.is_platform_admin` kolonu üzerinden olmalı.
+17. **Para hesabında `Decimal → float` dönüşümü erken yapma** — kuruş kaybı. Hesaplama boyunca `Decimal`, sadece response'a serialize ederken `float`.
+
+> **Audit ihlal listesi:** Bu kuralları zaten ihlal eden mevcut kod parçaları `.cursor/ACTION_PLAN.md` içinde **P0/P1 görevleri** olarak listelidir. Yeni kod yazarken bu listeyi kontrol et.
 
 ---
 
@@ -204,6 +214,49 @@ Detay için: `c:\Users\pc\.cursor\plans\future_erp_*.plan.md`.
 - WS bildirim (dev): [app/api/routes/ws_notifications.py](app/api/routes/ws_notifications.py) · hub: [app/realtime/notification_ws_hub.py](app/realtime/notification_ws_hub.py) · UI: [frontend/src/components/layout/NotificationBell.tsx](frontend/src/components/layout/NotificationBell.tsx)
 - Pytest: kök `pytest` (geliştirme: `requirements-dev.txt`).
 - Vitest: `cd frontend && npm run test`.
+- **Audit raporu:** [PROJECT_AUDIT_REPORT.md](PROJECT_AUDIT_REPORT.md) (2026-05-19)
+- **Atomik fix planı:** [.cursor/ACTION_PLAN.md](.cursor/ACTION_PLAN.md)
+
+---
+
+## 10. Bilinen sorunlar & audit kararları (2026-05-19)
+
+> **Bu bölüm her audit sonrası güncellenir.** Detay: [PROJECT_AUDIT_REPORT.md](PROJECT_AUDIT_REPORT.md). Görevler: [.cursor/ACTION_PLAN.md](.cursor/ACTION_PLAN.md).
+
+### 10.1. P0 — production-blocker (çözülmeden demo yok)
+
+| # | Bug | Dosya | Plan |
+|---|---|---|---|
+| 1 | WS JWT `tid` yerine `tenant_id` okunuyor → admin tenant'a sızıntı | `app/api/routes/ws_notifications.py:35` | ACTION_PLAN P0-1 |
+| 2 | `finance_records`, `employees` modelsiz tablo referansı → runtime 500 | `services/anomaly_service.py`, `services/nlp_assistant.py`, `core/module_config.py` | ACTION_PLAN P0-2 |
+| 3 | `stock_movements.quantity_change` ham SQL bug'ı (gerçek kolon `change`) | `services/anomaly_service.py:202-247` | ACTION_PLAN P0-3 |
+| 4 | Sales route'unda ham `db.execute(select(...))` → katman ihlali | `api/routes/sales.py:86-108` | ACTION_PLAN P0-4 |
+| 5 | NLP schema prompt'u modellerle drift; LLM yanlış kolon adlarıyla SQL üretiyor | `services/nlp_assistant.py:244-282` | ACTION_PLAN P0-5 |
+
+### 10.2. P1 — güvenlik & mimari (1-2 hafta)
+
+- Refresh token `localStorage` → HttpOnly cookie (P1-1)
+- `TenantScopedService` taban sınıfı (zorunlu kuraldı, eksikti) (P1-2)
+- NLP `_validate_sql` AST tabanlı yeniden yaz (P1-3)
+- Admin impersonation audit log tablosu (P1-4)
+- `_ADMIN_TENANT_ID = 1` magic number kaldır (P1-5)
+- Transaction normalize (sales/products service çift commit) (P1-6)
+- `settings.is_production` property (ENV "prod" vs "production" tutarsızlığı) (P1-7)
+- Multi-tenant izolasyon test seti (her endpoint için cross-tenant leak guard) (P1-8)
+
+### 10.3. P2 — kalite & ürünleştirme (sonra)
+
+Frontend React Query, lazy loading, error boundary; CI/CD (GitHub Actions); Docker; Sentry; Postgres geçişi; Redis+Celery; Customer-SalesRecord ilişkisi; KDV kolonu; multi-warehouse iskelet; Cmd+K palette. Detay: `.cursor/ACTION_PLAN.md` P2 bloğu.
+
+### 10.4. Audit kararları (kalıcı kurallar)
+
+Yeni audit'lerde bu kararlar tekrar tartışılmasın diye buraya pin'lendi:
+
+- **`finance_records` tablosu yok ve eklenmeyecek.** Finans hesabı `sales_records + sales_items` üzerinden yapılır (`finance_service.summary`). Faz 2'de Finance modülü yeniden ele alınınca **yeni isim + yeni model** ile gelir.
+- **`employees` tablosu Faz 2'de gelecek.** Şimdilik HR performans skoru `users` tablosundan proxy hesaplanır (`hr_performance_service`).
+- **WebSocket auth:** JWT `tid` claim'i tek doğru kaynak. URL query string'inde token taşımak **geçici dev çözümü**; Faz 2'de WS subprotocol veya kısa-ömürlü WS ticket'a geçilecek.
+- **Multi-tenant kuralı tek istisnasız:** Admin role bile cross-tenant veriye eriştiğinde `audit_logs` tablosuna yazmalı (P1-4 sonrası).
+- **NLP prompt schema = `Base.metadata` çıktısı.** Manuel schema yazımı yasak (P0-5 sonrası).
 
 ---
 

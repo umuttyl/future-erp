@@ -1,53 +1,253 @@
 ---
-description: FastAPI + SQLAlchemy backend standartlari
+description: FastAPI + SQLAlchemy backend standartlari (audit 2026-05-19 sonrasi)
 globs: app/**/*.py
 alwaysApply: false
 ---
 
 # Backend Kurallari
 
+> **Audit (2026-05-19):** Bu dosya gerçek ihlallere göre güçlendirildi. Her örneğin altında "Gerçek case" notu var (bilinen mevcut hataya referans). Çözüm `.cursor/ACTION_PLAN.md` içinde.
+
 ## Katman ayrimi (zorunlu)
-- `routes/` SADECE I/O. Hic is mantigi yok.
-- `services/` is mantigi, validasyon, transaction.
+
+- `routes/` SADECE I/O. Hiç iş mantığı, hiç DB sorgusu yok.
+- `services/` iş mantığı, validasyon, transaction.
 - `models/` ORM, `schemas/` Pydantic I/O.
 
 ```python
-# BAD - route icinde DB sorgusu
-@router.get("/products")
-def list_products(db: Session = Depends(get_db)):
-    return db.query(Product).all()
+# BAD — route içinde DB sorgusu
+@router.get("/analytics/daily")
+def daily(db: Session = Depends(get_db), ctx: TenantContext = Depends(get_tenant_ctx)):
+    stmt = select(SalesRecord.sale_date, func.sum(...))...
+    rows = db.execute(stmt).all()
+    return [...]
 
-# GOOD - service'e devret
-@router.get("/products", response_model=list[ProductOut])
-def list_products(svc: ProductsService = Depends()):
-    return svc.list_all()
+# GOOD — service'e devret
+@router.get("/analytics/daily", response_model=List[DailySalesPoint])
+def daily(
+    ctx: TenantContext = Depends(get_tenant_ctx),
+    db: Session = Depends(get_db),
+):
+    return sales_service.daily_sales_points(db, ctx.tenant_id)
+```
+
+**Gerçek case:** `app/api/routes/sales.py:daily_sales_analytics` bu kuralı ihlal ediyordu — ACTION_PLAN P0-4 ile düzeltilecek.
+
+**Detection (PR review checklist):**
+```powershell
+# Route dosyalarinda SQLAlchemy import veya db.execute kaldi mi?
+Select-String -Path app/api/routes/*.py -Pattern "(from sqlalchemy|db\.execute|select\(|func\.)" -CaseSensitive
 ```
 
 ## SQLAlchemy 2.0 typed
+
 - `Mapped[Type]` + `mapped_column(...)` kullan, eski Declarative API yok.
-- Iliskiler `Mapped[List["X"]]` veya `Mapped["X"]`.
+- İlişkiler `Mapped[List["X"]]` veya `Mapped["X"]`.
+- Yeni model yazarken **`app/models/__init__.py`'ya import** ekle (yoksa Alembic autogenerate göremez).
 
-## Multi-tenant (Faz 1+)
-- Her domain modelinde `tenant_id: Mapped[int]` zorunlu.
-- Her sorguda tenant filtresi: `where(Model.tenant_id == ctx.tenant_id)`.
-- Service base sinifi (`TenantScopedService`) bu filtreyi otomatik yapar.
+## Multi-tenant (KRITIK)
 
-## Hata yonetimi
-- ``app/core/exceptions.py`` siniflari: ``NotFoundException``, ``ValidationException``, ...
-- Global handlerlar ``main.py`` icinde — tek tip JSON:
-  ``{"error": {"code": "...", "message": "..."}}``.
-- Route'ta ``try/except`` sadece service'ten gelen ``ValueError`` (veya kapali domain hatasi) yi
-  ``ValidationException`` ile sarmalamak icin; genis yakalama route'ta kullanma (``main`` yakalar).
+Her domain modelinde `tenant_id: Mapped[int]` zorunlu. Her sorguda tenant filtresi.
+
+**Service base sınıfı (P1-2 sonrası zorunlu):**
+
+```python
+# app/services/_base.py
+class TenantScopedService(Generic[M]):
+    model: type[M]
+    def _scoped(self, tenant_id: int) -> Select:
+        return select(self.model).where(self.model.tenant_id == tenant_id)
+    def _get_one(self, db: Session, tenant_id: int, pk: int) -> Optional[M]:
+        return db.scalar(self._scoped(tenant_id).where(self.model.id == pk))
+
+# Kullanım:
+class ProductsService(TenantScopedService[Product]):
+    model = Product
+    def list(self, db, tenant_id, **kw):
+        return list(db.scalars(self._scoped(tenant_id)).all())
+```
+
+**Asla:**
+- Ham `db.execute(text("SELECT ... FROM x"))` tenant_id parametresi olmadan.
+- `db.query(Model).all()` (filtresiz).
+- `select(Model).where(Model.id == x)` (tenant_id filtresi yok).
+
+## Hata yönetimi
+
+`app/core/exceptions.py` sınıfları: `NotFoundException`, `ValidationException`, `ConflictException`, `PermissionException`, `UnauthorizedException`, `InternalError`.
+
+Global handler'lar `main.py` içinde — tek tip JSON:
+```json
+{"error": {"code": "...", "message": "..." }}
+```
+
+Route'ta `try/except` sadece service'ten gelen `ValueError`'ı `ValidationException` ile sarmalamak için. Geniş `except Exception:` route'ta yok (`main.py` yakalar ve 500 döner).
+
+```python
+# BAD
+try:
+    return service.do_it(db, ctx.tenant_id)
+except Exception as e:  # geniş yakalama
+    return {"error": str(e)}
+
+# GOOD
+try:
+    return service.do_it(db, ctx.tenant_id)
+except ValueError as e:
+    raise ValidationException(str(e)) from e
+```
+
+## Transaction yönetimi
+
+**Bir iş akışı = bir commit.** Birden fazla `db.commit()` çağrısı = kısmi başarı riski.
+
+```python
+# BAD — iki commit, ikincisi patlarsa yarım kayıt
+db.add(record)
+db.commit()                # ❌ erken commit
+for sm in stock_movements:
+    db.add(sm)
+db.commit()                # ❌ ikincisi patlarsa record orphan
+
+# GOOD — flush ile ID al, sonda tek commit
+db.add(record)
+db.flush()                 # ✓ record.id mevcut, commit etmez
+for sm in stock_movements:
+    sm.sales_record_id = record.id
+    db.add(sm)
+db.commit()                # ✓ atomic
+```
+
+**Daha güvenli (önerilen):**
+```python
+with db.begin():  # context manager — exception olursa rollback otomatik
+    db.add(record)
+    db.flush()
+    for sm in stock_movements:
+        db.add(sm)
+```
+
+**Gerçek case:** `sales_service.create_record` (satır 106 ve 121) iki commit — ACTION_PLAN P1-6.
+
+## Ham SQL (`text(...)`)
+
+Mümkünse **ORM kullan.** Ham SQL gerekiyorsa:
+1. **Kolon adları model ile aynı mı?** SQLAlchemy yazılışı `Mapped` deklarasyonundakidir; alias değil.
+2. **`:tid` parametresi her zaman bind edilmiş mi?** String concat YASAK.
+3. **`stock_movements.quantity_change` gibi var olmayan kolon yazmadığından emin ol** (gerçek: `change`).
+
+**Gerçek case:** `anomaly_service.detect_inventory_anomalies` `quantity_change` yazıyor, runtime'da `OperationalError: no such column` — ACTION_PLAN P0-3.
+
+**Genel kural:** Ham SQL'den önce ilgili modele bak, kolon adlarını kopyala:
+```powershell
+Get-Content app/models/stock_movement.py | Select-String "Mapped"
+```
+
+## Hayalet tablo kontrolü
+
+Bir tablo adını ham SQL veya NLP prompt'unda kullanmadan önce model var mı doğrula:
+
+```powershell
+# 'finance_records' tablosu var mı?
+Select-String -Path app/models/*.py -Pattern "__tablename__\s*=\s*[`"']finance_records"
+```
+
+**Gerçek case:** `finance_records`, `employees`, `inventory_items` modeli olmadan referans alındı — ACTION_PLAN P0-2.
+
 ## Logging
-- ``structlog``: ``structlog.get_logger(__name__)``; ``configure_logging()`` lifespan icinde.
-- Dev: renkli konsol; ENV=``prod``: JSON satiri (``app/core/logging.py``).
-- ``print()`` YASAK; PII log'lama yasak.
+
+```python
+import structlog
+logger = structlog.get_logger(__name__)
+logger.info("event_name", key=value)  # ✓
+print("debug...")                      # ❌ YASAK
+```
+
+- `configure_logging()` lifespan içinde çağrılır (`main.py`).
+- Dev: renkli konsol; `ENV=prod` veya `ENV=production`: JSON satır (`app/core/logging.py`).
+- **PII (email, T.C., telefon, IP) loglamak YASAK.**
+- Hassas alan görülürse `***` ile maskele.
 
 ## Migration
-- Sadece Alembic. `Base.metadata.create_all` SADECE test fixture'inda.
-- Schema degisikligi = yeni `alembic revision --autogenerate -m "..."`.
-- Eski migration'i geri donuk duzenleme; yeni migration ekle.
+
+- Sadece Alembic. `Base.metadata.create_all` YALNIZ test fixture'larında.
+- Schema değişikliği = yeni `alembic revision --autogenerate -m "..."`.
+- Eski migration'ı geri dönük düzenleme yok; yeni migration ekle.
+- Yeni model = `app/models/__init__.py`'a import ekle (autogenerate görsün).
+- Migration sonrası: `alembic upgrade head` + `alembic current` ile head doğrula.
 
 ## Async tercihi
-- I/O bound (DB, HTTP) async.
-- CPU-bound (Prophet, pandas agir is) sync, gerekirse `run_in_executor`.
+
+- I/O bound (DB, HTTP) async tercih edilir.
+- CPU-bound (Prophet, pandas ağır iş) sync; gerekirse `await asyncio.to_thread(fn, ...)`.
+- WebSocket loop'larında `time.sleep` YASAK — `await asyncio.sleep(...)`.
+
+## Pydantic v2
+
+- `BaseModel`, `model_config = ConfigDict(from_attributes=True)` (tüm `*Out` şemalarında).
+- `Field(..., max_length=...)` validation request inputlarında.
+- `EmailStr` kullanırken `.local` gibi reserved TLD'ler reddedilir (dikkat).
+
+## ENV bayrakları
+
+```python
+# BAD — string karşılaştırma her yerde farklı
+if settings.ENV != "prod":  # ❌ "production" geçemez
+if settings.ENV.lower() == "production":  # ❌ "prod" geçemez
+
+# GOOD — tek doğru kaynak
+if not settings.is_production:  # ✓ hem "prod" hem "production"
+```
+
+**Property tanımı (ACTION_PLAN P1-7 sonrası):**
+```python
+# app/core/config.py
+@property
+def is_production(self) -> bool:
+    return self.ENV.lower() in ("prod", "production")
+```
+
+## Para hesabı
+
+```python
+# BAD — float aritmetiği, kuruş kaybı
+revenue_f = float(revenue or 0)
+gross_profit = revenue_f - cogs  # ❌ float - float
+
+# GOOD — Decimal aritmetiği, son anda float'a çevir
+revenue_d = Decimal(str(revenue or 0))
+cogs_d = Decimal(str(cogs or 0))
+gross_profit = (revenue_d - cogs_d).quantize(Decimal("0.01"))
+# Response'da: float(gross_profit)
+```
+
+## In-memory state
+
+Process-local dict/list ile state tutmak (`_latest_results`, `_ws_anomaly_last_sent_by_product`) tek-instance'da çalışır, çoklu uvicorn worker'da kırılır. Production öncesi Redis'e taşı.
+
+```python
+# BAD — process-local
+_cache: dict[int, list] = {}
+
+# OK (dev only)
+# TODO(faz-2): Redis'e taşı
+_cache: dict[int, list] = {}
+```
+
+## Permission kontrolü
+
+Her korumalı endpoint için `Depends(require_permission("module.action"))`.
+
+```python
+# GOOD
+@router.delete("/customers/{id}")
+def delete(
+    id: int,
+    _: AuthPrincipal = Depends(require_permission(CRM_CUSTOMER_DELETE)),
+    ctx: TenantContext = Depends(get_tenant_ctx),
+    svc: CustomerService = Depends(),
+):
+    svc.delete(db, ctx.tenant_id, id)
+```
+
+`role_has_permission()` permission matrix'e (`app/core/permissions.py`) bakar; izinler string sabit olarak tanımlı.

@@ -1,6 +1,6 @@
 from typing import List, Optional
 
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy.orm import Session
 
 from app.core.db import get_db
@@ -26,11 +26,13 @@ router = APIRouter()
 
 @router.get("", response_model=list[ProductOut])
 def list_products(
+    skip: int = Query(0, ge=0),
+    limit: int = Query(200, ge=1, le=500),
     ctx: TenantContext = Depends(get_tenant_ctx),
     _: object = Depends(require_permission(CATALOG_PRODUCT_READ)),
     db: Session = Depends(get_db),
 ):
-    return products_service.list(db, ctx.tenant_id)
+    return products_service.list(db, ctx.tenant_id, skip=skip, limit=limit)
 
 
 @router.post("", response_model=ProductOut, status_code=status.HTTP_201_CREATED)

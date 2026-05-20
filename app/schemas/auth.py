@@ -73,6 +73,13 @@ class UserOut(BaseModel):
     department: Optional[str] = None
 
 
+class UserUpdateIn(BaseModel):
+    role: Optional[Literal["admin", "manager", "employee"]] = None
+    full_name: Optional[str] = Field(None, max_length=255)
+    department: Optional[str] = Field(None, max_length=128)
+    is_active: Optional[bool] = None
+
+
 class MeOut(BaseModel):
     id: int
     tenant_id: int
@@ -82,6 +89,7 @@ class MeOut(BaseModel):
     tenant_name: Optional[str] = None
     full_name: Optional[str] = None
     department: Optional[str] = None
+    onboarding_completed: bool = False
 
 
 class AdminUserCreateIn(BaseModel):

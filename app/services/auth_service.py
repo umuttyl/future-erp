@@ -8,8 +8,9 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.exceptions import ConflictException, UnauthorizedException
-from app.core.permissions import ROLE_ADMIN, role_permissions
+from app.core.permissions import ROLE_ADMIN, ROLE_MANAGER, role_permissions
 from app.core.security import (
+    DUMMY_HASH,
     create_access_token,
     hash_password,
     hash_refresh_token,
@@ -19,7 +20,7 @@ from app.core.security import (
 )
 from app.models.tenant import Tenant
 from app.models.user import RefreshToken, User
-from app.schemas.auth import AdminUserCreateIn, RegisterIn
+from app.schemas.auth import AdminUserCreateIn, RegisterIn, UserUpdateIn
 
 
 def _slugify(name: str) -> str:
@@ -60,7 +61,7 @@ class AuthService:
             password_hash=hash_password(data.password),
             full_name=fn,
             department=dep,
-            role=ROLE_ADMIN,
+            role=ROLE_MANAGER,  # Yeni kayıt = şirket sahibi (manager). Admin=platform superuser.
             is_active=True,
         )
         db.add(user)
@@ -82,7 +83,9 @@ class AuthService:
             )
         )
         user = db.scalar(stmt)
-        if not user or not verify_password(password, user.password_hash):
+        # Kullanıcı bulunamazsa yine hash doğrulaması yap; yanıt süresi eşit kalır (user enumeration önlemi).
+        candidate_hash = user.password_hash if user else DUMMY_HASH
+        if not user or not verify_password(password, candidate_hash):
             raise UnauthorizedException("E-posta veya şifre hatalı.", code="INVALID_CREDENTIALS")
         access, raw_refresh = self._issue_tokens(db, user)
         return user, access, raw_refresh
@@ -113,10 +116,18 @@ class AuthService:
         row = db.scalar(stmt)
         if not row:
             raise UnauthorizedException("Geçersiz yenileme anahtarı.", code="INVALID_REFRESH")
+        # Replay attack önlemi: aynı token ikinci kez kullanılamaz.
+        if row.used_at is not None:
+            row.revoked_at = datetime.now(timezone.utc)
+            db.add(row)
+            db.commit()
+            raise UnauthorizedException("Yenileme anahtarı zaten kullanıldı.", code="INVALID_REFRESH")
         user = self.get_user_by_id(db, row.user_id)
         if not user or not user.is_active:
             raise UnauthorizedException("Hesap kullanılamıyor.", code="INVALID_REFRESH")
-        row.revoked_at = datetime.now(timezone.utc)
+        now = datetime.now(timezone.utc)
+        row.used_at = now
+        row.revoked_at = now
         db.add(row)
         db.commit()
         access, new_raw = self._issue_tokens(db, user)
@@ -158,6 +169,42 @@ class AuthService:
         db.commit()
         db.refresh(u)
         return u
+
+
+    def update_user(
+        self,
+        db: Session,
+        *,
+        tenant_id: int,
+        user_id: int,
+        data: UserUpdateIn,
+    ) -> User:
+        from app.core.exceptions import NotFoundException
+
+        user = db.scalar(select(User).where(User.id == user_id, User.tenant_id == tenant_id))
+        if not user:
+            raise NotFoundException("Kullanıcı bulunamadı.", code="USER_NOT_FOUND")
+        if data.role is not None:
+            user.role = data.role
+        if data.full_name is not None:
+            user.full_name = data.full_name.strip() or None
+        if data.department is not None:
+            user.department = data.department.strip() or None
+        if data.is_active is not None:
+            user.is_active = data.is_active
+        db.add(user)
+        db.commit()
+        db.refresh(user)
+        return user
+
+    def delete_user(self, db: Session, *, tenant_id: int, user_id: int) -> None:
+        from app.core.exceptions import NotFoundException
+
+        user = db.scalar(select(User).where(User.id == user_id, User.tenant_id == tenant_id))
+        if not user:
+            raise NotFoundException("Kullanıcı bulunamadı.", code="USER_NOT_FOUND")
+        db.delete(user)
+        db.commit()
 
 
 auth_service = AuthService()

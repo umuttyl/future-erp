@@ -130,19 +130,13 @@ export function AppTopbar() {
                   <SearchX className="h-6 w-6 text-slate-400 dark:text-slate-500" />
                 </div>
                 <p className="mt-4 text-sm font-semibold text-slate-800 dark:text-slate-100">
-                  İlgili kayıt bulunamadı
+                  Sonuç bulunamadı
                 </p>
                 <p className="mt-1 max-w-xs text-xs leading-relaxed text-slate-500 dark:text-slate-400">
-                  Müşteri veya SKU araması henüz bağlı değil. Modül adı yazarak
-                  (ör.{" "}
-                  <strong className="text-slate-600 dark:text-slate-300">
-                    satış
-                  </strong>
+                  Modül adı yazarak ilgili sayfaya gidebilirsiniz (ör.{" "}
+                  <strong className="text-slate-600 dark:text-slate-300">satış</strong>
                   ,{" "}
-                  <strong className="text-slate-600 dark:text-slate-300">
-                    stok
-                  </strong>
-                  ) ilgili sayfaya gidebilirsiniz.
+                  <strong className="text-slate-600 dark:text-slate-300">stok</strong>).
                 </p>
               </div>
             )}

@@ -5,6 +5,9 @@ export const inputFieldClass =
 
 export const selectFieldClass = inputFieldClass
 
+export const textareaFieldClass =
+  'w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 outline-none ring-violet-500/20 placeholder:text-slate-400 focus:border-violet-400 focus:ring-2 resize-none dark:border-white/10 dark:bg-[#1a1628] dark:text-slate-100 dark:placeholder:text-slate-500 dark:focus:border-violet-500'
+
 export const primaryButtonClass =
   'rounded-full bg-gradient-to-r from-violet-600 to-indigo-600 px-4 py-2 text-sm font-semibold text-white shadow-lg shadow-violet-500/20 transition hover:opacity-95 disabled:opacity-50'
 

@@ -56,24 +56,6 @@ function StatusBadge({ active }: { active: boolean }) {
   )
 }
 
-function mockEmployeeDetail(row: EmployeePerformanceRow) {
-  const y = 2019 + (row.id % 6)
-  const m = row.id % 12
-  const d = 1 + (row.id % 25)
-  const hire = new Date(y, m, d)
-  return {
-    hireDate: hire.toLocaleDateString('tr-TR', { day: 'numeric', month: 'long', year: 'numeric' }),
-    manager: 'Ayşe Yılmaz',
-    phone: `+90 5${30 + (row.id % 39)} ${200 + (row.id % 700)} ${10_000 + (row.id % 8999)}`,
-    location: row.department?.trim() || 'Genel merkez — İstanbul',
-    activities: [
-      `${new Date().getFullYear()} Q1 performans görüşmesi tamamlandı.`,
-      'Son ERP oturumu: bugün, güvenli oturum.',
-      'Bekleyen izin onayı yok.',
-    ],
-  }
-}
-
 function EmployeeDetailModal({
   row,
   onClose,
@@ -81,7 +63,6 @@ function EmployeeDetailModal({
   row: EmployeePerformanceRow
   onClose: () => void
 }) {
-  const extra = mockEmployeeDetail(row)
 
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
@@ -133,41 +114,11 @@ function EmployeeDetailModal({
             <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">Departman</div>
             <p className="text-sm text-slate-800 dark:text-slate-200">{row.department ?? '—'}</p>
           </div>
-          <div className="space-y-1">
-            <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">İşe giriş</div>
-            <p className="text-sm text-slate-800 dark:text-slate-200">{extra.hireDate}</p>
-          </div>
-          <div className="space-y-1">
-            <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">Raporlayan yönetici</div>
-            <p className="text-sm text-slate-800 dark:text-slate-200">{extra.manager}</p>
-          </div>
-          <div className="space-y-1">
-            <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">İletişim</div>
-            <p className="text-sm text-slate-800 dark:text-slate-200">{extra.phone}</p>
-          </div>
-          <div className="space-y-1 sm:col-span-2">
-            <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">Lokasyon</div>
-            <p className="text-sm text-slate-800 dark:text-slate-200">{extra.location}</p>
-          </div>
           <div className="sm:col-span-2">
             <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">AI performans özeti</div>
             <p className="mt-2 rounded-xl border border-slate-200/80 bg-slate-50 px-4 py-3 text-sm leading-relaxed text-slate-800 dark:border-white/10 dark:bg-white/[0.04] dark:text-slate-200">
               {row.ai_insight} (Skor: {row.ai_score}/100)
             </p>
-          </div>
-          <div className="sm:col-span-2">
-            <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">Son aktiviteler</div>
-            <ul className="mt-2 space-y-2">
-              {extra.activities.map((line, i) => (
-                <li
-                  key={i}
-                  className="flex gap-2 rounded-lg border border-slate-100 bg-white px-3 py-2 text-sm text-slate-700 dark:border-white/10 dark:bg-[#12101f] dark:text-slate-300"
-                >
-                  <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-violet-500" aria-hidden />
-                  {line}
-                </li>
-              ))}
-            </ul>
           </div>
         </div>
 
