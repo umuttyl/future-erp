@@ -6,16 +6,18 @@ from sqlalchemy.orm import Session
 from app.models.product import Product
 from app.models.stock_movement import StockMovement
 from app.schemas.product import ProductCreate, ProductUpdate, StockAdjustRequest
+from app.services._base import TenantScopedService
 
 
-class ProductsService:
-    def list(self, db: Session, tenant_id: int) -> List[Product]:
-        stmt = select(Product).where(Product.tenant_id == tenant_id).order_by(Product.id.desc())
+class ProductsService(TenantScopedService[Product]):
+    model = Product
+
+    def list(self, db: Session, tenant_id: int, skip: int = 0, limit: int = 200) -> List[Product]:
+        stmt = self._scoped(tenant_id).order_by(Product.id.desc()).offset(skip).limit(limit)
         return list(db.scalars(stmt).all())
 
     def get(self, db: Session, tenant_id: int, product_id: int) -> Optional[Product]:
-        stmt = select(Product).where(Product.id == product_id, Product.tenant_id == tenant_id)
-        return db.scalar(stmt)
+        return self._get_one(db, tenant_id, product_id)
 
     def create(self, db: Session, tenant_id: int, data: ProductCreate) -> Product:
         obj = Product(

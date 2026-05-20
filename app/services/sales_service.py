@@ -11,9 +11,11 @@ from app.models.product import Product
 from app.models.sales import SalesItem, SalesRecord
 from app.models.stock_movement import StockMovement
 from app.schemas.sales import DailySalesPoint, SalesRecordCreate
+from app.services._base import TenantScopedService
 
 
-class SalesService:
+class SalesService(TenantScopedService[SalesRecord]):
+    model = SalesRecord
     def list_records(
         self,
         db: Session,
