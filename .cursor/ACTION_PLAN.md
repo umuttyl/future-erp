@@ -995,48 +995,221 @@ def test_endpoint_returns_only_own_tenant_data(client_for, two_tenants_with_data
 - "Yapılacaklar" mini listesi: kritik stok sayısı + onay bekleyen sipariş sayısı
 
 ---
-## Altyapı & DevOps
+
+## Yol Haritası Özeti
+
+```
+Ay 1-2  | Temel Is Degeri      | P2-16, P2-22  (+ P2-17 DONE)
+Ay 3-4  | Is Surecleri         | P3-1 ... P3-4
+Ay 5-6  | SaaS Olgunlasma      | P4-1 ... P4-5
+DevOps  | Altyapi (paralel)    | P2-7, P2-8, P2-9
+```
+
+---
+
+## Ay 1-2 — Temel İş Değeri
+
+> [x] **P2-17** Satış ↔ Müşteri CRM bağlantısı — **TAMAMLANDI**
+
+---
+
+### [ ] P2-16 — Bildirim Merkezi Backend Persistence
+
+**Kapsam:** WS bildirimleri şu an sadece bellekte; sayfa yenilenince kayboluyor. DB'de saklayıp okundu/okunmadı takibi ekle.
+
+**Backend:**
+- `notifications` tablosu: `id, tenant_id, user_id (nullable), type, title, body, severity, read_at, created_at`
+- Alembic migration
+- `NotificationService`: `create()`, `list_for_tenant()`, `mark_read()`, `mark_all_read()`
+- `GET /notifications` — son 50 bildirim (pagination desteğiyle)
+- `PATCH /notifications/{id}/read` — tek bildirim okundu işaretle
+- `PATCH /notifications/read-all` — hepsini okundu işaretle
+- WS hub her broadcast'te aynı anda DB'ye kaydet
+
+**Frontend:**
+- `NotificationBell.tsx`: WS listesi → DB'den çekilen liste ile birleştir (React Query)
+- Okunmamış sayacı gerçek zamanlı güncelle (WS gelince query invalidate)
+- Bildirim panelinde okundu/okunmadı toggle + "Tümünü okundu işaretle" butonu
+- Sayfa yenilense bile bildirimler kaybolmaz
+
+**Kabul kriteri:** Backend restart sonrası önceki bildirimler hâlâ görünür.
+
+---
+
+### [ ] P2-22 — Gider Takibi Modülü
+
+**Kapsam:** Şirketlerin gelir yanında giderlerini de girebileceği yeni modül. Finans sayfasında gerçek kar-zarar görünsün.
+
+**Backend:**
+- `expenses` tablosu: `id, tenant_id, category, amount, description, expense_date, created_by, created_at`
+- Kategoriler (enum): `rent` (Kira), `salary` (Maaş), `utilities` (Fatura), `raw_material` (Hammadde), `other` (Diğer)
+- Alembic migration
+- `ExpenseService`: CRUD, `monthly_totals()`, `by_category()`
+- `GET/POST /expenses` — liste + oluşturma
+- `PATCH/DELETE /expenses/{id}`
+- `GET /expenses/summary` — dönem bazlı toplam + kategori dağılımı
+- `/finance/summary` endpoint'i gider verisini dahil et: `total_expenses`, `net_profit = gross_profit - total_expenses`
+
+**Frontend:**
+- `Expenses.tsx` sayfası: CRUD tablosu + kategori badge'leri + tarih filtresi
+- `Finance.tsx`: "Net Kâr" KPI kartı ekle (Ciro − COGS − Giderler)
+- Gider trend grafiği (aylık, kategoriye göre renkli bar chart)
+- AppSidebar'a "Giderler" linki
+
+**Veri modeli notu:** Önce migration, sonra service, sonra route, sonra frontend.
+
+---
+
+## Altyapı & DevOps (Paralel Yürütülür)
 
 ### [ ] P2-7 — CI workflow (GitHub Actions)
+
+**Kapsam:** Her PR'da otomatik test + type-check
+
+`yaml
+# .github/workflows/ci.yml
+jobs:
+  backend:
+    - pip install -r requirements-dev.txt
+    - alembic upgrade head
+    - pytest -x -q
+  frontend:
+    - npm ci
+    - npx tsc --noEmit
+    - npm run build
+`
+
 ### [ ] P2-8 — Docker + docker-compose
+
+**Kapsam:** `docker compose up` ile tüm stack ayağa kalksın
+
+`
+services:
+  backend:  uvicorn app.main:app --host 0.0.0.0 --port 8000
+  frontend: nginx (vite build output)
+volumes:
+  - ./data:/app/data  (SQLite dosyası)
+`
+
 ### [ ] P2-9 — Sentry + correlation ID middleware
 
----
-## Veri Modeli İyileştirmeleri
+**Kapsam:** Üretimde hata takibi + istek izlenebilirliği
+- `X-Request-ID` header middleware (UUID inject)
+- Sentry SDK entegrasyonu (FastAPI + React)
+- Hata loglarına `tenant_id` + `request_id` ekle
 
-### [ ] P2-10 — ~~`Customer.id` ↔ `SalesRecord.customer_id` ilişkisi~~ → P2-17 ile kapsandı
+---
+
+## Veri Modeli İyileştirmeleri (Ay 1-2 Sonunda)
+
+### [x] P2-10 — Customer.id <-> SalesRecord.customer_id iliskisi → P2-17 ile kapsandı
+
 ### [ ] P2-11 — Soft-delete indeksleri + filtre helper
-### [ ] P2-12 — `SalesItem` üzerine KDV/tax kolonu (e-Fatura hazırlığı)
-### [ ] P2-13 — Multi-warehouse iskelet (`warehouses`, `stock_levels`)
+**Kapsam:** Tüm `deleted_at IS NULL` filtreleri merkezi bir helper'dan geçsin; indeks eksikleri giderilsin.
+
+### [ ] P2-12 — SalesItem üzerine KDV/tax kolonu
+**Kapsam:** `tax_rate NUMERIC(5,2) DEFAULT 0`, `tax_amount` hesaplanmış kolon — e-Fatura hazırlığı.
 
 ---
-## Büyük Mimari
 
-### [ ] P2-14 — Redis + Celery (Prophet & anomaly background)
-### [ ] P2-15 — Postgres geçişi + JSONB
-### [ ] P2-16 — UX: Cmd+K command palette + bildirim merkezi backend persistence
+## Ay 3-4 — İş Süreçleri
 
-> Her görev için ayrı bir mini-spec yaz, ACTION_PLAN'a ek olarak `.cursor/specs/P2-XX.md` dosyalarına çıkar.
+### [ ] P3-1 — Toplu CSV Import (ürün & müşteri)
+
+**Kapsam:** Excel/CSV'den toplu veri yükleme
+- `POST /products/import` — CSV upload, satır bazlı hata raporu
+- `POST /customers/import`
+- Frontend: drag-and-drop upload alanı, önizleme tablosu, hatalı satırları vurgula
+- Maks. 500 satır / istek; duplike SKU kontrolü
+
+### [ ] P3-2 — Satınalma Siparişi Onay Akışı
+
+**Kapsam:** `SupplyOrder` durumu `Draft → Pending → Approved → Completed / Rejected`
+- Durum geçişleri için permission kontrolü (`purchasing.approve`)
+- `PATCH /inventory/orders/{id}/status`
+- Frontend: Orders sayfasında tablo + aksiyon butonları
+- Dashboard'da "Onay bekleyen sipariş" sayacı
+
+### [ ] P3-3 — Müşteri Değer Analizi (LTV)
+
+**Kapsam:** Her müşteri için hesaplanmış metrikler
+- `GET /customers/{id}/analytics`: toplam harcama, sipariş sayısı, ort. sipariş değeri, son sipariş tarihi, tahmini LTV
+- Müşteri listesinde puan badge'i
+- "En değerli müşteriler" raporu
+
+### [ ] P3-4 — Görev / Hatırlatıcı Sistemi
+
+**Kapsam:** Basit iç görev takibi (CRM'e entegre)
+- `tasks` tablosu: `title, due_date, assigned_to, related_customer_id (nullable), status`
+- `GET/POST/PATCH /tasks`
+- Frontend: müşteri kartında bağlı görevler; Dashboard'da "Görevler" mini-widget
+- Vadesi geçmiş görevler → bildirim kanalına düşsün
+
+---
+
+## Ay 5-6 — SaaS Olgunlaşma
+
+### [ ] P4-1 — Abonelik / Billing Modülü
+
+**Kapsam:** Tenant başına plan yönetimi
+- `plans` tablosu: Free / Starter / Pro
+- iyzico veya Stripe webhook entegrasyonu
+- Plan limitleri: kullanıcı sayısı, modül erişimi, AI çağrı kotası
+
+### [ ] P4-2 — Çoklu Depo / Şube Desteği
+
+**Kapsam:** P2-13 iskeletini tamamla
+- `warehouses` + `stock_levels` tabloları
+- Stok hareketleri depo bazlı
+- Ürün sayfasında depo seçici
+
+### [ ] P4-3 — PWA + Mobil Optimizasyon
+
+**Kapsam:** Uygulama mobilde kullanılabilir olsun
+- `manifest.json` + service worker (Vite PWA plugin)
+- Touch-friendly card layout (< 640px)
+- Offline stok görüntüleme (cached)
+
+### [ ] P4-4 — Otomatik Haftalık AI Raporu (In-App)
+
+**Kapsam:** Her Pazartesi otomatik özet bildirimi (P2-14 önkoşul)
+- Celery beat görevi: haftalık satış/gider/stok özeti
+- AI ile kısa yorum üret
+- Bildirim Merkezi'ne (P2-16) düşsün
+
+### [ ] P4-5 — PDF Fatura & Excel Export
+
+**Kapsam:** Yasal uyumluluk için belge üretimi
+- `GET /sales/records/{id}/pdf` — WeasyPrint ile fatura PDF
+- `GET /finance/export` — dönem bazlı Excel (openpyxl)
+- Frontend'de "PDF İndir" + "Excel İndir" butonları
+
+---
+
+## Büyük Mimari (Uzun Vadeli Önkoşullar)
+
+### [ ] P2-13 — Multi-warehouse iskelet (`warehouses`, `stock_levels`) — P4-2 önkoşulu
+### [ ] P2-14 — Redis + Celery (Prophet & anomaly background) — P4-4 önkoşulu
+### [ ] P2-15 — PostgreSQL geçişi + JSONB (SQLite'dan migration)
 
 ---
 
 ## Genel kurallar — Claude Code için
 
-1. **Sırayla git.** P0 bitmeden P1'e geçme.
+1. **Sırayla git.** P0 bitmeden P1'e geçme; Ay 1-2 bitmeden Ay 3-4'e geçme.
 2. **Her görev = bir commit.** Conventional Commits + `(ACTION_PLAN P<X>-<N>)` etiketi.
 3. **Test yaz.** Görev "complete" sayılmaz, eğer ona dair test yoksa.
 4. **Doğrulama komutunu çalıştır.** `pytest -x` veya görev içinde belirtilen komut.
-5. **Sorun çıkarsa görevi `in_progress` bırak.** Hatayı dosyada `### Notlar` başlığı altına yaz; bir sonraki görevin önkoşulu yapmaya zorlama.
+5. **Sorun çıkarsa görevi `in_progress` bırak.** Hatayı dosyada `### Notlar` başlığı altına yaz.
 6. **Checkbox işaretle.** `[ ]` → `[x]`. Bitenleri en üste taşıma; sırayı koru.
 7. **Hiçbir model değişikliği migration'sız olmayacak.** `alembic revision --autogenerate` zorunlu.
-8. **Kullanıcıya sormadan görev silme/değiştirme yok.** Yeni gereksinim çıkarsa ACTION_PLAN'ın sonuna yeni P2-X olarak ekle.
+8. **Kullanıcıya sormadan görev silme/değiştirme yok.** Yeni gereksinim çıkarsa ACTION_PLAN'ın sonuna yeni görev olarak ekle.
 
 ---
 
-## İlerleme takibi
+## İlerleme Takibi
 
-Tamamlanan görevleri buradan da takip et:
-
+### Tamamlananlar
 - [x] P0-1 — WS tenant_id sızıntısı
 - [x] P0-2 — Hayalet tablo temizliği
 - [x] P0-3 — `quantity_change` → `change`
@@ -1050,3 +1223,32 @@ Tamamlanan görevleri buradan da takip et:
 - [x] P1-6 — Transaction normalize
 - [x] P1-7 — `is_production` property
 - [x] P1-8 — Multi-tenant test seti
+- [x] P2-1 — React Query + Dashboard refactor
+- [x] P2-2 — Lazy loading + code splitting
+- [x] P2-3 — Token storage memory hybrid
+- [x] P2-4 — TypeScript strict mode
+- [x] P2-5 — ErrorBoundary + LoadingState
+- [x] P2-6 — pip-compile requirements pin
+- [x] P2-17 — Satış ↔ Müşteri CRM bağlantısı
+- [x] P2-18 — Stok hareketi toast + auto-scroll
+- [x] P2-19 — Tedarik siparişi sonrası modal
+- [x] P2-20 — Finans tarih filtresi URL-state
+- [x] P2-21 — Dashboard AI aksiyon kartları
+
+### Sıradaki (öncelik sırasıyla)
+- [ ] P2-16 — Bildirim Merkezi Backend Persistence  <- Ay 1-2
+- [ ] P2-22 — Gider Takibi Modülü                  <- Ay 1-2
+- [ ] P2-7  — CI workflow (GitHub Actions)          <- paralel
+- [ ] P2-8  — Docker + docker-compose               <- paralel
+- [ ] P2-9  — Sentry + correlation ID               <- paralel
+- [ ] P2-11 — Soft-delete indeksleri
+- [ ] P2-12 — KDV/tax kolonu
+- [ ] P3-1  — CSV Import                            <- Ay 3-4
+- [ ] P3-2  — Sipariş onay akışı                    <- Ay 3-4
+- [ ] P3-3  — Müşteri LTV analizi                   <- Ay 3-4
+- [ ] P3-4  — Görev / Hatırlatıcı                   <- Ay 3-4
+- [ ] P4-1  — Billing modülü                        <- Ay 5-6
+- [ ] P4-2  — Çoklu depo                            <- Ay 5-6
+- [ ] P4-3  — PWA + mobil                           <- Ay 5-6
+- [ ] P4-4  — Haftalık AI raporu                    <- Ay 5-6
+- [ ] P4-5  — PDF fatura & Excel export             <- Ay 5-6
