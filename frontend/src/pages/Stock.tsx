@@ -1,10 +1,11 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Loader2, Sparkles } from 'lucide-react'
 import { useSearchParams } from 'react-router-dom'
 
 import { AppToast } from '../components/ui/AppToast'
 import { GlobalCard, GlobalCardHeader } from '../components/ui/GlobalCard'
 import { PageLayout } from '../components/ui/PageLayout'
+import { SkeletonTable } from '../components/ui/Skeleton'
 import { useAuth } from '../context/AuthContext'
 import {
   ghostButtonClass,
@@ -85,6 +86,8 @@ export function StockPage() {
   const [busy, setBusy] = useState(false)
   const [draftingProductId, setDraftingProductId] = useState<number | null>(null)
   const [toast, setToast] = useState<{ variant: 'success' | 'error'; message: string } | null>(null)
+  const [draftResult, setDraftResult] = useState<{ productName: string; qty: number; stockBefore: number; targetStock: number; demand30d: number | null } | null>(null)
+  const movementsRef = useRef<HTMLDivElement>(null)
 
   const dismissToast = useCallback(() => setToast(null), [])
 
@@ -246,9 +249,17 @@ export function StockPage() {
         note: adjust.note || undefined,
         reference: 'manual',
       }
-      await api.post(`/products/${adjust.productId}/stock`, payload)
+      const { data: mv } = await api.post<StockMovement>(`/products/${adjust.productId}/stock`, payload)
+      const productName = products.find((p) => p.id === adjust.productId)?.name ?? `#${adjust.productId}`
       setAdjust(emptyAdjust)
       await load()
+      setToast({
+        variant: 'success',
+        message: `${productName}: ${delta > 0 ? '+' : ''}${delta} stok hareketi kaydedildi · Yeni bakiye: ${mv.balance_after}`,
+      })
+      window.setTimeout(() => {
+        movementsRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+      }, 150)
     } catch (e: unknown) {
       setError(getApiErrorMessage(e, 'Stok güncellenemedi'))
     } finally {
@@ -260,12 +271,15 @@ export function StockPage() {
     if (draftingProductId != null) return
     setDraftingProductId(p.id)
     dismissToast()
+    setDraftResult(null)
     try {
       const res = await postInventoryAutoDraft(p.id)
-      const qty = res.order.quantity
-      setToast({
-        variant: 'success',
-        message: `Tedarikçiye ${formatNumber(qty)} adet sipariş taslağı AI tarafından oluşturuldu`,
+      setDraftResult({
+        productName: p.name,
+        qty: res.order.quantity,
+        stockBefore: res.stock_before,
+        targetStock: res.target_stock,
+        demand30d: res.prophet_demand_sum_30d,
       })
     } catch (e: unknown) {
       setToast({
@@ -310,6 +324,7 @@ export function StockPage() {
           </LabeledField>
           <LabeledField label="Kategori">
             <select
+              aria-label="Kategori filtrele"
               value={filterCat}
               onChange={(e) => setFilterCat(e.target.value)}
               className={selectFieldClass + ' min-w-[160px]'}
@@ -325,10 +340,13 @@ export function StockPage() {
         </div>
       </GlobalCard>
 
+      {loading && products.length === 0 ? (
+        <SkeletonTable rows={8} cols={8} />
+      ) : (
       <GlobalCard>
         <GlobalCardHeader
           title="Ürünler"
-          description={loading ? 'Yükleniyor…' : `${filtered.length} ürün`}
+          description={`${filtered.length} ürün`}
           right={error ? <span className="text-sm text-rose-600 dark:text-rose-300">Hata: {error}</span> : null}
         />
         <div className="-mx-5 overflow-x-auto border-t border-slate-100 dark:border-white/5">
@@ -451,7 +469,9 @@ export function StockPage() {
           </table>
         </div>
       </GlobalCard>
+      )}
 
+      <div ref={movementsRef}>
       <GlobalCard>
         <GlobalCardHeader title="Son stok hareketleri" description="Son 30 kayıt" />
         <div className="-mx-5 overflow-x-auto border-t border-slate-100 dark:border-white/5">
@@ -508,12 +528,14 @@ export function StockPage() {
           </table>
         </div>
       </GlobalCard>
+      </div>
 
       {showForm ? (
         <Modal title={editing ? 'Ürün Düzenle' : 'Yeni Ürün'} onClose={() => setShowForm(false)}>
           <div className="grid grid-cols-2 gap-3">
             <LabeledField label="SKU">
               <input
+                aria-label="SKU"
                 value={form.sku}
                 onChange={(e) => setForm({ ...form, sku: e.target.value })}
                 className={inputFieldClass}
@@ -521,6 +543,7 @@ export function StockPage() {
             </LabeledField>
             <LabeledField label="Kategori">
               <input
+                aria-label="Kategori"
                 value={form.category}
                 onChange={(e) => setForm({ ...form, category: e.target.value })}
                 className={inputFieldClass}
@@ -528,6 +551,7 @@ export function StockPage() {
             </LabeledField>
             <LabeledField label="Ürün Adı" className="col-span-2">
               <input
+                aria-label="Ürün adı"
                 value={form.name}
                 onChange={(e) => setForm({ ...form, name: e.target.value })}
                 className={inputFieldClass}
@@ -535,6 +559,7 @@ export function StockPage() {
             </LabeledField>
             <LabeledField label="Birim Fiyat">
               <input
+                aria-label="Birim fiyat"
                 type="number"
                 step="0.01"
                 value={form.unit_price}
@@ -544,6 +569,7 @@ export function StockPage() {
             </LabeledField>
             <LabeledField label="Maliyet">
               <input
+                aria-label="Maliyet"
                 type="number"
                 step="0.01"
                 value={form.cost_price}
@@ -554,6 +580,7 @@ export function StockPage() {
             {!editing ? (
               <LabeledField label="Başlangıç Stoğu">
                 <input
+                  aria-label="Başlangıç stoğu"
                   type="number"
                   min="0"
                   value={form.stock_quantity}
@@ -564,6 +591,7 @@ export function StockPage() {
             ) : null}
             <LabeledField label="Kritik Eşik">
               <input
+                aria-label="Kritik eşik"
                 type="number"
                 min="0"
                 value={form.reorder_level}
@@ -589,6 +617,7 @@ export function StockPage() {
           <div className="grid grid-cols-2 gap-3">
             <LabeledField label="Hareket Tipi">
               <select
+                aria-label="Hareket tipi"
                 value={adjust.movement_type}
                 onChange={(e) =>
                   setAdjust({
@@ -627,6 +656,32 @@ export function StockPage() {
             </button>
             <button type="button" disabled={busy} onClick={() => void submitAdjust()} className={primaryButtonClass}>
               {busy ? 'İşleniyor…' : 'Kaydet'}
+            </button>
+          </div>
+        </Modal>
+      ) : null}
+
+      {draftResult ? (
+        <Modal title="Tedarik Taslağı Oluşturuldu" onClose={() => setDraftResult(null)}>
+          <div className="space-y-3">
+            <p className="text-sm text-slate-700 dark:text-slate-300">
+              <span className="font-semibold">{draftResult.productName}</span> için AI tarafından tedarik taslağı oluşturuldu.
+            </p>
+            <div className="grid grid-cols-2 gap-2 rounded-xl bg-slate-50 p-4 dark:bg-white/5">
+              <DraftStat label="Sipariş miktarı" value={formatNumber(draftResult.qty)} accent="violet" />
+              <DraftStat label="Mevcut stok" value={formatNumber(draftResult.stockBefore)} />
+              <DraftStat label="Hedef stok" value={formatNumber(draftResult.targetStock)} />
+              {draftResult.demand30d != null && (
+                <DraftStat label="Tahmini 30g talep" value={formatNumber(Math.round(draftResult.demand30d))} />
+              )}
+            </div>
+            <p className="text-xs text-slate-500 dark:text-slate-400">
+              Sipariş taslağı, tedarik modülünden onaylanmaya hazır.
+            </p>
+          </div>
+          <div className="mt-4 flex justify-end">
+            <button type="button" onClick={() => setDraftResult(null)} className={primaryButtonClass}>
+              Tamam
             </button>
           </div>
         </Modal>
@@ -694,6 +749,17 @@ function LabeledField({
       </span>
       {children}
     </label>
+  )
+}
+
+function DraftStat({ label, value, accent }: { label: string; value: string; accent?: 'violet' }) {
+  return (
+    <div>
+      <div className="text-[10px] font-medium uppercase tracking-wide text-slate-500 dark:text-slate-400">{label}</div>
+      <div className={['mt-0.5 text-sm font-semibold', accent === 'violet' ? 'text-violet-700 dark:text-violet-300' : 'text-slate-900 dark:text-slate-100'].join(' ')}>
+        {value}
+      </div>
+    </div>
   )
 }
 
