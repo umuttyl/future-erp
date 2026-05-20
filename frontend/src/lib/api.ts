@@ -3,7 +3,6 @@ import axios, { type InternalAxiosRequestConfig } from "axios";
 import {
   clearSession,
   getAccessToken,
-  getRefreshToken,
   saveTokens,
 } from "./authSession";
 
@@ -40,6 +39,8 @@ export type AuthUserRow = {
   email: string;
   role: string;
   is_active: boolean;
+  full_name?: string | null;
+  department?: string | null;
 };
 
 export type EmployeePerformanceRow = {

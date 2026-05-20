@@ -1,17 +1,21 @@
+import { Bot, Lock, TrendingUp, Zap } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
 
 import {
   Area,
   CartesianGrid,
+  ComposedChart,
   Legend,
   Line,
-  ComposedChart,
   ResponsiveContainer,
   Tooltip,
   XAxis,
   YAxis,
 } from 'recharts'
 
+import { ForecastChart, type ForecastPoint } from '../components/ai/ForecastChart'
+import { InsightBanner, InsightCardSection } from '../components/ai/InsightCards'
+import { StockAlertList } from '../components/ai/StockAlertList'
 import { GlobalCard, GlobalCardHeader } from '../components/ui/GlobalCard'
 import { PageLayout } from '../components/ui/PageLayout'
 import {
@@ -20,14 +24,13 @@ import {
   primaryButtonClass,
   secondaryButtonClass,
 } from '../components/ui/forms'
+import { useAuth } from '../context/AuthContext'
 import { useTheme } from '../context/ThemeContext'
 import {
   api,
   formatCurrency,
-  formatDate,
   formatNumber,
   getApiErrorMessage,
-  type AiHighlight,
   type AiInsights,
   type DailySalesPoint,
   type ForecastResult,
@@ -35,308 +38,318 @@ import {
   type StockAlert,
 } from '../lib/api'
 
-type DashboardPoint = {
-  date: string
-  actualQty?: number
-  forecastQty?: number
-  lower?: number
-  upper?: number
-}
+// ---------------------------------------------------------------------------
+// Sample questions — tailored per role
+// ---------------------------------------------------------------------------
 
-const SAMPLE_QUESTIONS = [
+const QUESTIONS_ADMIN = [
+  'Tüm şirketlerin son 30 günlük cirosunu karşılaştır',
+  'Platform genelinde stoğu kritik seviyenin altında olan ürünleri listele',
+  'Her şirketteki kullanıcı sayısını göster',
+  'En yüksek cirolu 5 şirket hangisi?',
+  'Hangi sektörde toplam satış en yüksek?',
+]
+
+const QUESTIONS_MANAGER = [
   'En yüksek ciro getiren 5 ürünü listele',
   'Son 30 günün aylık cirosunu göster',
   'Stoğu eşik seviyesinin altında olan ürünler',
   'Hangi müşteri en çok sipariş verdi?',
 ]
 
+const QUESTIONS_EMPLOYEE = [
+  'Stoğu kritik seviyenin altında olan ürünler',
+  'Bugün kaç satış yapıldı?',
+  'En çok satan ürün hangisi?',
+]
+
 function iso(d: string) {
   return new Date(d).toISOString().slice(0, 10)
 }
 
-export function AiAnalysisPage() {
-  const { theme } = useTheme()
-  const isDark = theme === 'dark'
-  const gridStroke = isDark ? '#334155' : '#cbd5e1'
-  const axisStroke = isDark ? '#94a3b8' : '#64748b'
+function formatCellLoose(key: string, value: unknown): string {
+  if (value === null || value === undefined) return '—'
+  const lk = key.toLowerCase()
+  if (
+    lk.includes('ciro') || lk.includes('tutar') || lk.includes('amount') ||
+    lk.includes('revenue') || lk.includes('price') || lk.includes('cost')
+  ) {
+    const n = Number(value)
+    if (Number.isFinite(n)) return formatCurrency(n)
+  }
+  if (typeof value === 'number') return formatNumber(value)
+  if (typeof value === 'string' && /^\d{4}-\d{2}-\d{2}/.test(value)) return value.slice(0, 10)
+  return String(value)
+}
 
-  const [insights, setInsights] = useState<AiInsights | null>(null)
-  const [insightsLoading, setInsightsLoading] = useState(true)
-  const [insightsError, setInsightsError] = useState<string | null>(null)
+// ---------------------------------------------------------------------------
+// Role badge
+// ---------------------------------------------------------------------------
 
-  const [alerts, setAlerts] = useState<StockAlert[]>([])
-  const [daily, setDaily] = useState<DailySalesPoint[]>([])
-  const [forecasts, setForecasts] = useState<ForecastResult[]>([])
-  const [forecastBusy, setForecastBusy] = useState(false)
+function RoleBadge({ role }: { role: string }) {
+  const cfg = {
+    admin:    { label: 'Tam Sistem Erişimi',  cls: 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300',     icon: Zap },
+    manager:  { label: 'Şirket Verisi',       cls: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300', icon: TrendingUp },
+    employee: { label: 'Kısıtlı Erişim',      cls: 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-400', icon: Lock },
+  }[role] ?? { label: role, cls: 'bg-slate-100 text-slate-600', icon: Bot }
+
+  const Icon = cfg.icon
+  return (
+    <span className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-semibold ${cfg.cls}`}>
+      <Icon className="h-3 w-3" strokeWidth={2} />
+      {cfg.label}
+    </span>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// NLP Query Panel — shared, with role-specific sample questions
+// ---------------------------------------------------------------------------
+
+function NlpPanel({ role }: { role: string }) {
+  const questions =
+    role === 'admin' ? QUESTIONS_ADMIN :
+    role === 'manager' ? QUESTIONS_MANAGER :
+    QUESTIONS_EMPLOYEE
 
   const [question, setQuestion] = useState('')
-  const [qLoading, setQLoading] = useState(false)
-  const [qResult, setQResult] = useState<NlpQueryResponse | null>(null)
-  const [qError, setQError] = useState<string | null>(null)
+  const [loading, setLoading]   = useState(false)
+  const [result, setResult]     = useState<NlpQueryResponse | null>(null)
+  const [err, setErr]           = useState<string | null>(null)
 
-  async function loadInsights() {
-    try {
-      setInsightsLoading(true)
-      setInsightsError(null)
-      const { data } = await api.get<AiInsights>('/ai/insights')
-      setInsights(data)
-    } catch (e: unknown) {
-      setInsightsError(getApiErrorMessage(e, 'AI özeti yüklenemedi'))
-    } finally {
-      setInsightsLoading(false)
-    }
-  }
-
-  async function loadSupporting() {
-    try {
-      const [a, d, f] = await Promise.all([
-        api.get<StockAlert[]>('/ai/stock-alerts'),
-        api.get<DailySalesPoint[]>('/sales/analytics/daily'),
-        api.get<ForecastResult[]>('/forecast/results'),
-      ])
-      setAlerts(a.data)
-      setDaily(d.data)
-      setForecasts(f.data)
-    } catch {
-      /* noop */
-    }
-  }
-
-  useEffect(() => {
-    void loadInsights()
-    void loadSupporting()
-  }, [])
-
-  const latestProphet = useMemo(() => {
-    const prophet = forecasts.filter((x) => x.model_name === 'prophet')
-    return prophet.length ? prophet[0] : forecasts[0]
-  }, [forecasts])
-
-  const chartData = useMemo<DashboardPoint[]>(() => {
-    const map = new Map<string, DashboardPoint>()
-    for (const p of daily) {
-      const key = iso(p.date)
-      map.set(key, { date: key, actualQty: p.quantity })
-    }
-    const fDaily = latestProphet?.result_payload?.daily ?? []
-    for (const p of fDaily as Record<string, unknown>[]) {
-      const key = iso(String(p.date))
-      const cur = map.get(key) ?? { date: key }
-      cur.forecastQty =
-        typeof p.quantity === 'number'
-          ? p.quantity
-          : typeof p.value === 'number'
-            ? p.value
-            : undefined
-      cur.lower = typeof p.yhat_lower === 'number' ? p.yhat_lower : undefined
-      cur.upper = typeof p.yhat_upper === 'number' ? p.yhat_upper : undefined
-      map.set(key, cur)
-    }
-    return Array.from(map.values()).sort((a, b) => a.date.localeCompare(b.date))
-  }, [daily, latestProphet])
-
-  async function runProphet() {
-    setForecastBusy(true)
-    try {
-      await api.post('/forecast/prophet/run', { horizon_days: 30 })
-      await loadSupporting()
-    } catch (e: unknown) {
-      alert(getApiErrorMessage(e, 'Tahmin çalıştırılamadı'))
-    } finally {
-      setForecastBusy(false)
-    }
-  }
-
-  async function askQuestion(text?: string) {
+  async function ask(text?: string) {
     const q = (text ?? question).trim()
     if (q.length < 1) return
     setQuestion(q)
-    setQLoading(true)
-    setQError(null)
-    setQResult(null)
+    setLoading(true)
+    setErr(null)
+    setResult(null)
     try {
-      const { data } = await api.post<NlpQueryResponse>("/chat", { text: q })
-      setQResult(data)
+      const { data } = await api.post<NlpQueryResponse>('/chat', { text: q })
+      setResult(data)
     } catch (e: unknown) {
-      setQError(getApiErrorMessage(e, 'Soru çalıştırılamadı'))
+      setErr(getApiErrorMessage(e, 'Soru çalıştırılamadı'))
     } finally {
-      setQLoading(false)
+      setLoading(false)
     }
   }
 
   return (
-    <PageLayout
-      title="AI Analizi"
-      subtitle="Gemini destekli içgörüler, Prophet tabanlı talep tahmini ve doğal dil sorguları."
-      actions={
+    <GlobalCard>
+      <div className="flex items-start justify-between gap-3">
+        <GlobalCardHeader
+          title={role === 'admin' ? 'AI Platform Asistanı' : 'AI Chatbot'}
+          description={
+            role === 'admin'
+              ? 'Tüm şirketlerin verilerini sorgulayın — cross-tenant SQL, platform KPI\'lar, şirket karşılaştırmaları.'
+              : 'Doğal dilde sorun; uygun SQL üretilir ve cevap yazılır.'
+          }
+        />
+        <RoleBadge role={role} />
+      </div>
+
+      {role === 'employee' && (
+        <div className="mb-4 flex items-center gap-2 rounded-xl border border-blue-200 bg-blue-50 px-4 py-2.5 text-sm text-blue-800 dark:border-blue-500/30 dark:bg-blue-950/40 dark:text-blue-200">
+          <Lock className="h-4 w-4 shrink-0" />
+          Çalışan hesabınız ile stok ve satış verilerini sorgulayabilirsiniz. Finans ve sistem verileri kısıtlıdır.
+        </div>
+      )}
+
+      <div className="flex flex-wrap gap-2">
+        {questions.map((q) => (
+          <button
+            key={q}
+            type="button"
+            onClick={() => void ask(q)}
+            className={ghostButtonClass + ' rounded-full text-xs'}
+          >
+            {q}
+          </button>
+        ))}
+      </div>
+
+      <div className="mt-3 flex gap-2">
+        <input
+          aria-label="AI'ya soru sor"
+          value={question}
+          onChange={(e) => setQuestion(e.target.value)}
+          onKeyDown={(e) => { if (e.key === 'Enter' && !loading) void ask() }}
+          placeholder={
+            role === 'employee'
+              ? 'Örn: Kritik stok seviyesindeki ürünler neler?'
+              : 'Örn: En yüksek stokta olan 3 kategoriyi listele'
+          }
+          className={inputFieldClass + ' flex-1'}
+        />
         <button
           type="button"
-          onClick={() => void loadInsights()}
+          onClick={() => void ask()}
+          disabled={loading || question.trim().length < 3}
+          className={primaryButtonClass + ' shrink-0 disabled:opacity-50'}
+        >
+          {loading ? 'Düşünüyor…' : 'Sor'}
+        </button>
+      </div>
+
+      {err && (
+        <div className="mt-3 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-800 dark:border-rose-500/30 dark:bg-rose-950/40 dark:text-rose-100">
+          Hata: {err}
+        </div>
+      )}
+
+      {result && (
+        <div className="mt-4 space-y-3">
+          <div className="whitespace-pre-wrap rounded-xl border border-sky-200 bg-sky-50 px-4 py-3 text-sm text-slate-800 dark:border-sky-500/30 dark:bg-sky-950/40 dark:text-slate-100">
+            {result.answer}
+          </div>
+          {result.data.length > 0 && (
+            <div className="overflow-hidden rounded-xl border border-slate-200 dark:border-white/10">
+              <div className="max-h-[340px] overflow-auto">
+                <table className="min-w-full text-sm">
+                  <thead>
+                    <tr className="sticky top-0 bg-slate-100 text-left text-[11px] font-semibold uppercase tracking-wide text-slate-600 dark:bg-slate-900/95 dark:text-slate-400">
+                      {result.columns.map((c) => (
+                        <th key={c} className="px-3 py-2">{c}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {result.data.map((row, i) => (
+                      <tr key={i} className="border-t border-slate-100 dark:border-white/5">
+                        {result.columns.map((c) => (
+                          <td key={c} className="px-3 py-2 text-slate-800 dark:text-slate-200">
+                            {formatCellLoose(c, (row as Record<string, unknown>)[c])}
+                          </td>
+                        ))}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+          {role !== 'employee' && (
+            <details className="text-[11px] text-slate-500 dark:text-slate-400">
+              <summary className="cursor-pointer select-none font-medium text-slate-700 dark:text-slate-300">
+                Kullanılan SQL
+              </summary>
+              <pre className="mt-2 max-h-40 overflow-auto rounded-lg border border-slate-200 bg-slate-100 p-2 text-[11px] text-slate-800 dark:border-white/10 dark:bg-slate-950 dark:text-slate-300">
+                {result.sql}
+              </pre>
+            </details>
+          )}
+        </div>
+      )}
+    </GlobalCard>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Employee-only view
+// ---------------------------------------------------------------------------
+
+function EmployeeAiView({ alerts }: { alerts: StockAlert[] }) {
+  return (
+    <>
+      {/* Info banner */}
+      <div className="flex items-start gap-3 rounded-2xl border border-amber-200 bg-amber-50 p-4 dark:border-amber-500/30 dark:bg-amber-950/40">
+        <Lock className="mt-0.5 h-5 w-5 shrink-0 text-amber-600 dark:text-amber-400" />
+        <div>
+          <p className="text-sm font-medium text-amber-900 dark:text-amber-100">Kısıtlı AI Erişimi</p>
+          <p className="mt-1 text-xs text-amber-700 dark:text-amber-300">
+            Çalışan hesabınız ile stok ve satış verilerini sorgulayabilirsiniz. AI tahmin modeli ve finansal analiz yönetici yetkisi gerektirir.
+          </p>
+        </div>
+      </div>
+
+      <StockAlertList alerts={alerts} />
+      <NlpPanel role="employee" />
+    </>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Full view (admin + manager)
+// ---------------------------------------------------------------------------
+
+function FullAiView({
+  role,
+  insights,
+  insightsLoading,
+  insightsError,
+  onReloadInsights,
+  chartData,
+  latestProphet,
+  forecastBusy,
+  onRunProphet,
+  alerts,
+  isDark,
+  gridStroke,
+  axisStroke,
+}: {
+  role: string
+  insights: AiInsights | null
+  insightsLoading: boolean
+  insightsError: string | null
+  onReloadInsights: () => void
+  chartData: ForecastPoint[]
+  latestProphet: ForecastResult | undefined
+  forecastBusy: boolean
+  onRunProphet: () => void
+  alerts: StockAlert[]
+  isDark: boolean
+  gridStroke: string
+  axisStroke: string
+}) {
+  return (
+    <>
+      {/* Role banner */}
+      <div className={`flex items-center gap-3 rounded-2xl border p-4 ${
+        role === 'admin'
+          ? 'border-red-200 bg-red-50 dark:border-red-500/30 dark:bg-red-950/30'
+          : 'border-emerald-200 bg-emerald-50 dark:border-emerald-500/30 dark:bg-emerald-950/30'
+      }`}>
+        {role === 'admin' ? (
+          <Zap className="h-5 w-5 shrink-0 text-red-600 dark:text-red-400" />
+        ) : (
+          <TrendingUp className="h-5 w-5 shrink-0 text-emerald-600 dark:text-emerald-400" />
+        )}
+        <div>
+          <p className={`text-sm font-medium ${role === 'admin' ? 'text-red-900 dark:text-red-100' : 'text-emerald-900 dark:text-emerald-100'}`}>
+            {role === 'admin' ? 'Tam Sistem Erişimi' : 'Şirket AI Analizi'}
+          </p>
+          <p className={`text-xs mt-0.5 ${role === 'admin' ? 'text-red-700 dark:text-red-300' : 'text-emerald-700 dark:text-emerald-300'}`}>
+            {role === 'admin'
+              ? 'Tüm tenant verilerine, AI tahminlerine ve sistem anomalilerine erişebilirsiniz.'
+              : 'Şirketinizin satış, stok ve finansal verilerini AI ile analiz edin.'}
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={onReloadInsights}
           disabled={insightsLoading}
-          className={secondaryButtonClass + ' disabled:opacity-50'}
+          className={secondaryButtonClass + ' ml-auto shrink-0 disabled:opacity-50'}
         >
           {insightsLoading ? 'Yükleniyor…' : 'İçgörüyü Yenile'}
         </button>
-      }
-    >
-      <div className="rounded-2xl border border-violet-300/40 bg-gradient-to-br from-slate-900 via-indigo-950 to-slate-900 p-6 text-white shadow-md dark:border-violet-500/25">
-        <div className="text-xs font-semibold uppercase tracking-wide text-violet-200">AI headline</div>
-        <div className="mt-2 text-xl font-semibold text-white">
-          {insightsLoading
-            ? 'AI işletme verilerinizi analiz ediyor…'
-            : insightsError
-              ? `Hata: ${insightsError}`
-              : (insights?.headline ?? '—')}
-        </div>
-        {insights && (
-          <div className="mt-3 flex flex-wrap items-center gap-3 text-xs">
-            <Chip label="Son 30 gün ciro" value={formatCurrency(insights.context.summary_last_30.revenue)} />
-            <Chip
-              label="Ciro değişimi"
-              value={`${insights.context.revenue_growth_pct >= 0 ? '+' : ''}${insights.context.revenue_growth_pct.toFixed(2)}%`}
-              accent={insights.context.revenue_growth_pct >= 0 ? 'positive' : 'warning'}
-            />
-            <Chip
-              label="Kritik stok"
-              value={formatNumber(insights.context.low_stock_products.length)}
-              accent={insights.context.low_stock_products.length > 0 ? 'critical' : 'positive'}
-            />
-            <Chip label="Aktif SKU" value={formatNumber(insights.context.total_skus)} />
-          </div>
-        )}
       </div>
 
-      <section className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
-        {insightsLoading && <HighlightSkeleton />}
-        {insightsLoading && <HighlightSkeleton />}
-        {insightsLoading && <HighlightSkeleton />}
-        {!insightsLoading && (insights?.highlights ?? []).map((h, i) => <HighlightCard key={i} h={h} />)}
-      </section>
+      <InsightBanner loading={insightsLoading} error={insightsError} insights={insights} />
+      <InsightCardSection loading={insightsLoading} highlights={insights?.highlights ?? []} />
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
-        <GlobalCard className="lg:col-span-2">
-          <GlobalCardHeader
-            title="Talep tahmini (Prophet)"
-            description={
-              latestProphet
-                ? `Geçmiş satışlar + tahmin. Son eğitim: ${formatDate(latestProphet.created_at)}`
-                : 'Henüz tahmin yok.'
-            }
-            right={
-              <button
-                type="button"
-                onClick={() => void runProphet()}
-                disabled={forecastBusy}
-                className={primaryButtonClass + ' disabled:opacity-50'}
-              >
-                {forecastBusy ? 'Çalışıyor…' : 'Tahmini yenile'}
-              </button>
-            }
-          />
-          <div className="h-[320px]">
-            {chartData.length === 0 ? (
-              <div className="flex h-full items-center justify-center text-sm text-slate-500 dark:text-slate-400">
-                Henüz satış/tahmin verisi yok.
-              </div>
-            ) : (
-              <ResponsiveContainer width="100%" height="100%">
-                <ComposedChart data={chartData} margin={{ top: 10, right: 16, left: 0, bottom: 0 }}>
-                  <defs>
-                    <linearGradient id="ai-actual" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor="#22c55e" stopOpacity={0.35} />
-                      <stop offset="95%" stopColor="#22c55e" stopOpacity={0.02} />
-                    </linearGradient>
-                    <linearGradient id="ai-forecast" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor="#60a5fa" stopOpacity={0.35} />
-                      <stop offset="95%" stopColor="#60a5fa" stopOpacity={0.02} />
-                    </linearGradient>
-                  </defs>
-                  <CartesianGrid stroke={gridStroke} strokeDasharray="3 3" />
-                  <XAxis dataKey="date" stroke={axisStroke} tick={{ fontSize: 12 }} />
-                  <YAxis stroke={axisStroke} tick={{ fontSize: 12 }} />
-                  <Tooltip
-                    contentStyle={{
-                      background: isDark ? '#0f172a' : '#ffffff',
-                      border: isDark ? '1px solid #334155' : '1px solid #e2e8f0',
-                      borderRadius: 12,
-                    }}
-                    labelStyle={{ color: isDark ? '#e2e8f0' : '#0f172a' }}
-                    itemStyle={{ color: isDark ? '#e2e8f0' : '#334155' }}
-                  />
-                  <Legend />
-                  <Area
-                    type="monotone"
-                    dataKey="actualQty"
-                    name="Gerçek talep"
-                    stroke="#22c55e"
-                    fill="url(#ai-actual)"
-                  />
-                  <Area
-                    type="monotone"
-                    dataKey="forecastQty"
-                    name="Tahmin"
-                    stroke="#60a5fa"
-                    fill="url(#ai-forecast)"
-                  />
-                  <Line
-                    type="monotone"
-                    dataKey="upper"
-                    name="Üst sınır"
-                    stroke="#60a5fa"
-                    strokeDasharray="3 3"
-                    dot={false}
-                    strokeOpacity={0.5}
-                  />
-                  <Line
-                    type="monotone"
-                    dataKey="lower"
-                    name="Alt sınır"
-                    stroke="#60a5fa"
-                    strokeDasharray="3 3"
-                    dot={false}
-                    strokeOpacity={0.5}
-                  />
-                </ComposedChart>
-              </ResponsiveContainer>
-            )}
-          </div>
-        </GlobalCard>
-
-        <GlobalCard>
-          <GlobalCardHeader title="Stok uyarıları" description="Eşik altı ürünler" />
-          {alerts.length === 0 ? (
-            <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-900 dark:border-emerald-500/30 dark:bg-emerald-950/40 dark:text-emerald-100">
-              Şu an kritik seviyede olan ürün yok.
-            </div>
-          ) : (
-            <ul className="space-y-2 text-sm">
-              {alerts.map((a) => (
-                <li
-                  key={a.id}
-                  className="flex items-center justify-between rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 dark:border-rose-500/25 dark:bg-rose-950/30"
-                >
-                  <div>
-                    <div className="font-semibold text-slate-900 dark:text-slate-100">{a.name}</div>
-                    <div className="text-xs text-slate-600 dark:text-slate-400">{a.sku}</div>
-                  </div>
-                  <div className="text-right">
-                    <div className="font-mono font-semibold text-rose-800 dark:text-rose-200">
-                      {a.stock_quantity} / {a.reorder_level}
-                    </div>
-                    <div className="text-[10px] text-slate-500">stok / eşik</div>
-                  </div>
-                </li>
-              ))}
-            </ul>
-          )}
-        </GlobalCard>
+        <ForecastChart
+          data={chartData}
+          lastTrainedAt={latestProphet?.created_at}
+          busy={forecastBusy}
+          isDark={isDark}
+          onRefresh={onRunProphet}
+        />
+        <StockAlertList alerts={alerts} />
       </div>
 
       <GlobalCard>
-        <GlobalCardHeader
-          title="Aylık trend"
-          description="Son aylardaki ciro ve sipariş hacmi."
-        />
+        <GlobalCardHeader title="Aylık trend" description="Son aylardaki ciro ve sipariş hacmi." />
         <div className="h-[260px]">
           {insights ? (
             <ResponsiveContainer width="100%" height="100%">
@@ -366,23 +379,8 @@ export function AiAnalysisPage() {
                   }
                 />
                 <Legend />
-                <Area
-                  yAxisId="left"
-                  type="monotone"
-                  dataKey="revenue"
-                  name="Ciro"
-                  stroke="#60a5fa"
-                  fill="#60a5fa22"
-                />
-                <Line
-                  yAxisId="right"
-                  type="monotone"
-                  dataKey="orders"
-                  name="Sipariş"
-                  stroke="#22c55e"
-                  strokeWidth={2}
-                  dot={{ r: 3 }}
-                />
+                <Area yAxisId="left" type="monotone" dataKey="revenue" name="Ciro" stroke="#60a5fa" fill="#60a5fa22" />
+                <Line yAxisId="right" type="monotone" dataKey="orders" name="Sipariş" stroke="#22c55e" strokeWidth={2} dot={{ r: 3 }} />
               </ComposedChart>
             </ResponsiveContainer>
           ) : (
@@ -391,221 +389,134 @@ export function AiAnalysisPage() {
         </div>
       </GlobalCard>
 
-      <GlobalCard>
-        <GlobalCardHeader
-          title="AI'ya hızlı soru"
-          description="Doğal dilde sorun; uygun SQL üretilir ve cevap yazılır."
+      <NlpPanel role={role} />
+    </>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Page
+// ---------------------------------------------------------------------------
+
+export function AiAnalysisPage() {
+  const { user } = useAuth()
+  const { theme } = useTheme()
+  const isDark = theme === 'dark'
+  const gridStroke = isDark ? '#334155' : '#cbd5e1'
+  const axisStroke = isDark ? '#94a3b8' : '#64748b'
+  const role = user?.role ?? 'employee'
+
+  const [insights,        setInsights]        = useState<AiInsights | null>(null)
+  const [insightsLoading, setInsightsLoading] = useState(true)
+  const [insightsError,   setInsightsError]   = useState<string | null>(null)
+  const [alerts,          setAlerts]          = useState<StockAlert[]>([])
+  const [daily,           setDaily]           = useState<DailySalesPoint[]>([])
+  const [forecasts,       setForecasts]       = useState<ForecastResult[]>([])
+  const [forecastBusy,    setForecastBusy]    = useState(false)
+
+  async function loadInsights() {
+    try {
+      setInsightsLoading(true)
+      setInsightsError(null)
+      const { data } = await api.get<AiInsights>('/ai/insights')
+      setInsights(data)
+    } catch (e: unknown) {
+      setInsightsError(getApiErrorMessage(e, 'AI özeti yüklenemedi'))
+    } finally {
+      setInsightsLoading(false)
+    }
+  }
+
+  async function loadSupporting() {
+    try {
+      const [a, d, f] = await Promise.all([
+        api.get<StockAlert[]>('/ai/stock-alerts'),
+        api.get<DailySalesPoint[]>('/sales/analytics/daily'),
+        api.get<ForecastResult[]>('/forecast/results'),
+      ])
+      setAlerts(a.data)
+      setDaily(d.data)
+      setForecasts(f.data)
+    } catch { /* noop */ }
+  }
+
+  useEffect(() => {
+    if (role === 'employee') {
+      // Employee only needs stock alerts
+      api.get<StockAlert[]>('/ai/stock-alerts').then((r) => setAlerts(r.data)).catch(() => {})
+      setInsightsLoading(false)
+      return
+    }
+    void loadInsights()
+    void loadSupporting()
+  }, [role])
+
+  const latestProphet = useMemo(() => {
+    const p = forecasts.filter((x) => x.model_name === 'prophet')
+    return p.length ? p[0] : forecasts[0]
+  }, [forecasts])
+
+  const chartData = useMemo<ForecastPoint[]>(() => {
+    const map = new Map<string, ForecastPoint>()
+    for (const p of daily) {
+      const key = iso(p.date)
+      map.set(key, { date: key, actualQty: p.quantity })
+    }
+    const fDaily = latestProphet?.result_payload?.daily ?? []
+    for (const p of fDaily as Record<string, unknown>[]) {
+      const key = iso(String(p.date))
+      const cur = map.get(key) ?? { date: key }
+      cur.forecastQty = typeof p.quantity === 'number' ? p.quantity : typeof p.value === 'number' ? p.value : undefined
+      cur.lower = typeof p.yhat_lower === 'number' ? p.yhat_lower : undefined
+      cur.upper = typeof p.yhat_upper === 'number' ? p.yhat_upper : undefined
+      map.set(key, cur)
+    }
+    return Array.from(map.values()).sort((a, b) => a.date.localeCompare(b.date))
+  }, [daily, latestProphet])
+
+  async function runProphet() {
+    setForecastBusy(true)
+    try {
+      await api.post('/forecast/prophet/run', { horizon_days: 30 })
+      await loadSupporting()
+    } catch (e: unknown) {
+      alert(getApiErrorMessage(e, 'Tahmin çalıştırılamadı'))
+    } finally {
+      setForecastBusy(false)
+    }
+  }
+
+  const pageTitle =
+    role === 'admin'    ? 'AI Sistem Analizi' :
+    role === 'manager'  ? 'AI Şirket Analizi'  :
+    'AI Asistan'
+
+  const pageSubtitle =
+    role === 'admin'    ? 'Gemini içgörüler, Prophet tahmini, anomali tespiti ve tam sistem NLP sorgusu.' :
+    role === 'manager'  ? 'Şirketinizin AI destekli içgörüleri, tahminleri ve doğal dil sorguları.' :
+    'Stok ve satış verilerinizi doğal dille sorgulayın.'
+
+  return (
+    <PageLayout title={pageTitle} subtitle={pageSubtitle}>
+      {role === 'employee' ? (
+        <EmployeeAiView alerts={alerts} />
+      ) : (
+        <FullAiView
+          role={role}
+          insights={insights}
+          insightsLoading={insightsLoading}
+          insightsError={insightsError}
+          onReloadInsights={() => void loadInsights()}
+          chartData={chartData}
+          latestProphet={latestProphet}
+          forecastBusy={forecastBusy}
+          onRunProphet={() => void runProphet()}
+          alerts={alerts}
+          isDark={isDark}
+          gridStroke={gridStroke}
+          axisStroke={axisStroke}
         />
-        <div className="flex flex-wrap gap-2">
-          {SAMPLE_QUESTIONS.map((q) => (
-            <button
-              key={q}
-              type="button"
-              onClick={() => void askQuestion(q)}
-              className={ghostButtonClass + ' rounded-full text-xs'}
-            >
-              {q}
-            </button>
-          ))}
-        </div>
-        <div className="mt-3 flex gap-2">
-          <input
-            value={question}
-            onChange={(e) => setQuestion(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter' && !qLoading) void askQuestion()
-            }}
-            placeholder="Örn: En yüksek stokta olan 3 kategoriyi listele"
-            className={inputFieldClass + ' flex-1'}
-          />
-          <button
-            type="button"
-            onClick={() => void askQuestion()}
-            disabled={qLoading || question.trim().length < 3}
-            className={primaryButtonClass + ' shrink-0 disabled:opacity-50'}
-          >
-            {qLoading ? 'Düşünüyor…' : 'Sor'}
-          </button>
-        </div>
-
-        {qError && (
-          <div className="mt-3 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-800 dark:border-rose-500/30 dark:bg-rose-950/40 dark:text-rose-100">
-            Hata: {qError}
-          </div>
-        )}
-
-        {qResult && (
-          <div className="mt-4 space-y-3">
-            <div className="whitespace-pre-wrap rounded-xl border border-sky-200 bg-sky-50 px-4 py-3 text-sm text-slate-800 dark:border-sky-500/30 dark:bg-sky-950/40 dark:text-slate-100">
-              {qResult.answer}
-            </div>
-            {qResult.data.length > 0 && (
-              <div className="overflow-hidden rounded-xl border border-slate-200 dark:border-white/10">
-                <div className="max-h-[340px] overflow-auto">
-                  <table className="min-w-full text-sm">
-                    <thead>
-                      <tr className="sticky top-0 bg-slate-100 text-left text-[11px] font-semibold uppercase tracking-wide text-slate-600 dark:bg-slate-900/95 dark:text-slate-400">
-                        {qResult.columns.map((c) => (
-                          <th key={c} className="px-3 py-2">
-                            {c}
-                          </th>
-                        ))}
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {qResult.data.map((row, i) => (
-                        <tr key={i} className="border-t border-slate-100 dark:border-white/5">
-                          {qResult.columns.map((c) => (
-                            <td key={c} className="px-3 py-2 text-slate-800 dark:text-slate-200">
-                              {formatCellLoose(c, (row as Record<string, unknown>)[c])}
-                            </td>
-                          ))}
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-            )}
-            <details className="text-[11px] text-slate-500 dark:text-slate-400">
-              <summary className="cursor-pointer select-none font-medium text-slate-700 dark:text-slate-300">
-                Kullanılan SQL
-              </summary>
-              <pre className="mt-2 max-h-40 overflow-auto rounded-lg border border-slate-200 bg-slate-100 p-2 text-[11px] text-slate-800 dark:border-white/10 dark:bg-slate-950 dark:text-slate-300">
-                {qResult.sql}
-              </pre>
-            </details>
-          </div>
-        )}
-      </GlobalCard>
+      )}
     </PageLayout>
   )
-}
-
-function formatCellLoose(key: string, value: unknown): string {
-  if (value === null || value === undefined) return '—'
-  const lk = key.toLowerCase()
-  if (
-    lk.includes('ciro') ||
-    lk.includes('tutar') ||
-    lk.includes('amount') ||
-    lk.includes('revenue') ||
-    lk.includes('price') ||
-    lk.includes('cost')
-  ) {
-    const n = Number(value)
-    if (Number.isFinite(n)) return formatCurrency(n)
-  }
-  if (typeof value === 'number') return formatNumber(value)
-  if (typeof value === 'string' && /^\d{4}-\d{2}-\d{2}/.test(value)) return value.slice(0, 10)
-  return String(value)
-}
-
-function Chip({
-  label,
-  value,
-  accent,
-}: {
-  label: string
-  value: string
-  accent?: 'positive' | 'warning' | 'critical'
-}) {
-  const cls =
-    accent === 'positive'
-      ? 'border-white/20 bg-white/10 text-emerald-100'
-      : accent === 'warning'
-        ? 'border-white/20 bg-white/10 text-amber-100'
-        : accent === 'critical'
-          ? 'border-white/20 bg-white/10 text-rose-100'
-          : 'border-white/15 bg-white/5 text-slate-100'
-  return (
-    <div className={['rounded-xl border px-3 py-1.5', cls].join(' ')}>
-      <span className="text-[10px] uppercase tracking-wide opacity-90">{label}</span>
-      <span className="ml-2 text-sm font-semibold">{value}</span>
-    </div>
-  )
-}
-
-function HighlightCard({ h }: { h: AiHighlight }) {
-  const cfg = severityConfig(h.severity)
-  return (
-    <GlobalCard className={['border-l-4', cfg.borderLeft].join(' ')}>
-      <div className="flex items-center gap-2">
-        <span className={['h-2 w-2 shrink-0 rounded-full', cfg.dot].join(' ')} />
-        <div className={['text-xs font-semibold uppercase tracking-wide', cfg.label].join(' ')}>{cfg.name}</div>
-      </div>
-      <div className={['mt-2 text-sm font-semibold', cfg.titleClass].join(' ')}>{h.title}</div>
-      <div className={['mt-1 text-sm', cfg.bodyClass].join(' ')}>{h.body}</div>
-      {h.metric ? (
-        <div
-          className={[
-            'mt-3 inline-block rounded-lg border px-2 py-1 text-[11px] font-mono',
-            cfg.metricBox,
-          ].join(' ')}
-        >
-          {h.metric}
-        </div>
-      ) : null}
-    </GlobalCard>
-  )
-}
-
-function HighlightSkeleton() {
-  return (
-    <GlobalCard className="animate-pulse">
-      <div className="h-3 w-16 rounded bg-slate-200 dark:bg-slate-700" />
-      <div className="mt-3 h-4 w-3/4 rounded bg-slate-200 dark:bg-slate-700" />
-      <div className="mt-2 h-3 w-full rounded bg-slate-200 dark:bg-slate-700" />
-      <div className="mt-1 h-3 w-2/3 rounded bg-slate-200 dark:bg-slate-700" />
-    </GlobalCard>
-  )
-}
-
-function severityConfig(severity: AiHighlight['severity']) {
-  switch (severity) {
-    case 'positive':
-      return {
-        name: 'Olumlu',
-        borderLeft: 'border-l-emerald-500',
-        dot: 'bg-emerald-500',
-        label: 'text-emerald-700 dark:text-emerald-400',
-        titleClass: 'text-slate-900 dark:text-slate-50',
-        bodyClass: 'text-slate-700 dark:text-slate-300',
-        metricBox:
-          'border-slate-200 bg-slate-100 text-slate-800 dark:border-white/10 dark:bg-black/20 dark:text-slate-200',
-      }
-    case 'warning':
-      return {
-        name: 'Uyarı',
-        borderLeft: 'border-l-amber-500',
-        dot: 'bg-amber-500',
-        label: 'text-amber-800 dark:text-amber-300',
-        titleClass: 'text-slate-900 dark:text-slate-50',
-        bodyClass: 'text-slate-700 dark:text-slate-300',
-        metricBox:
-          'border-amber-200 bg-amber-50 text-amber-950 dark:border-amber-500/20 dark:bg-amber-950/40 dark:text-amber-100',
-      }
-    case 'critical':
-      return {
-        name: 'Kritik',
-        borderLeft: 'border-l-rose-500',
-        dot: 'bg-rose-500',
-        label: 'text-rose-800 dark:text-rose-300',
-        titleClass: 'text-slate-900 dark:text-slate-50',
-        bodyClass: 'text-slate-700 dark:text-slate-300',
-        metricBox:
-          'border-rose-200 bg-rose-50 text-rose-950 dark:border-rose-500/20 dark:bg-rose-950/40 dark:text-rose-100',
-      }
-    default:
-      return {
-        name: 'Bilgi',
-        borderLeft: 'border-l-sky-500',
-        dot: 'bg-sky-500',
-        label: 'text-sky-800 dark:text-sky-300',
-        titleClass: 'text-slate-900 dark:text-slate-50',
-        bodyClass: 'text-slate-700 dark:text-slate-300',
-        metricBox:
-          'border-slate-200 bg-slate-100 text-slate-800 dark:border-white/10 dark:bg-slate-900/60 dark:text-slate-200',
-      }
-  }
 }
