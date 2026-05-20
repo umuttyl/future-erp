@@ -18,6 +18,9 @@ from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from slowapi.errors import RateLimitExceeded
+from slowapi.middleware import SlowAPIMiddleware
+from sqlalchemy.exc import SQLAlchemyError
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app.api.router import api_router
@@ -25,6 +28,7 @@ from app.core.config import settings
 from app.core.dev_bootstrap import ensure_dev_demo_users_if_empty
 from app.core.exceptions import AppException, InternalError
 from app.core.logging import configure_logging
+from app.core.rate_limit import limiter
 
 logger = structlog.get_logger(__name__)
 
@@ -37,6 +41,12 @@ async def lifespan(app: FastAPI):
         project=settings.PROJECT_NAME,
         env=settings.ENV,
     )
+    if settings.AUTO_CREATE_DB:
+        import app.models as _models  # noqa: F401 — registers all ORM classes
+        from app.core.db import engine
+        from app.models.base import Base
+        Base.metadata.create_all(bind=engine, checkfirst=True)
+
     ensure_dev_demo_users_if_empty()
 
     ws_anomaly_task: asyncio.Task[None] | None = None
@@ -121,6 +131,21 @@ def register_exception_handlers(app: FastAPI) -> None:
         }
         return JSONResponse(status_code=exc.status_code, content=payload)
 
+    @app.exception_handler(RateLimitExceeded)
+    async def handle_rate_limit(_request: Request, _exc: RateLimitExceeded) -> JSONResponse:
+        return JSONResponse(
+            status_code=429,
+            content={"error": {"code": "RATE_LIMIT_EXCEEDED", "message": "Çok fazla istek gönderildi, lütfen biraz bekleyin."}},
+        )
+
+    @app.exception_handler(SQLAlchemyError)
+    async def handle_db_error(_request: Request, exc: SQLAlchemyError) -> JSONResponse:
+        logger.exception("db_error", error_type=type(exc).__name__, error=str(exc))
+        return JSONResponse(
+            status_code=500,
+            content={"error": {"code": "DB_ERROR", "message": "Veritabanı hatası oluştu."}},
+        )
+
     @app.exception_handler(Exception)
     async def handle_unexpected(_request: Request, exc: Exception) -> JSONResponse:
         logger.exception(
@@ -139,15 +164,17 @@ def create_app() -> FastAPI:
         lifespan=lifespan,
         redirect_slashes=False,
     )
+    app.state.limiter = limiter
     register_exception_handlers(app)
     # HTTP CORS; WebSocket el sıkışması tarayıcı kökeni + Vite proxy (ws: true) ile aynı mantıkta çalışır.
     app.add_middleware(
         CORSMiddleware,
         allow_origins=settings.cors_origins_list(),
         allow_credentials=True,
-        allow_methods=["*"],
-        allow_headers=["*"],
+        allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+        allow_headers=["Authorization", "Content-Type", "X-Tenant-ID"],
     )
+    app.add_middleware(SlowAPIMiddleware)
     app.include_router(api_router, prefix="/api")
     return app
 

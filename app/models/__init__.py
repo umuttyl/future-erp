@@ -1,4 +1,7 @@
+from app.models.audit_log import AuditLog  # noqa: F401
+from app.models.customer import Customer  # noqa: F401
 from app.models.product import Product  # noqa: F401
+from app.models.supplier import Supplier  # noqa: F401
 from app.models.sales import SalesItem, SalesRecord  # noqa: F401
 from app.models.sales_forecast_result import SalesForecastResult  # noqa: F401
 from app.models.stock_movement import StockMovement  # noqa: F401
