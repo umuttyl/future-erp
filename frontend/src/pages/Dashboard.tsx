@@ -78,6 +78,126 @@ function useDateRanges() {
 }
 
 // ---------------------------------------------------------------------------
+// AI action cards (manager dashboard)
+// ---------------------------------------------------------------------------
+
+type ActionCardItem = {
+  severity: "critical" | "warning" | "info"
+  title: string
+  body: string
+  to: string
+  cta: string
+}
+
+const ACTION_SEVERITY_STYLE: Record<ActionCardItem["severity"], { wrap: string; title: string; btn: string }> = {
+  critical: {
+    wrap: "bg-rose-50 border-rose-200 dark:bg-rose-950/30 dark:border-rose-500/30",
+    title: "text-rose-800 dark:text-rose-200",
+    btn: "bg-rose-600 hover:bg-rose-700 text-white",
+  },
+  warning: {
+    wrap: "bg-amber-50 border-amber-200 dark:bg-amber-950/30 dark:border-amber-500/30",
+    title: "text-amber-800 dark:text-amber-200",
+    btn: "bg-amber-600 hover:bg-amber-700 text-white",
+  },
+  info: {
+    wrap: "bg-blue-50 border-blue-200 dark:bg-blue-950/30 dark:border-blue-500/30",
+    title: "text-blue-800 dark:text-blue-200",
+    btn: "bg-blue-600 hover:bg-blue-700 text-white",
+  },
+}
+
+function ActionCard({ severity, title, body, to, cta }: ActionCardItem) {
+  const s = ACTION_SEVERITY_STYLE[severity]
+  return (
+    <div className={`flex flex-col gap-3 rounded-2xl border p-4 ${s.wrap}`}>
+      <div className={`text-sm font-semibold ${s.title}`}>{title}</div>
+      <p className="text-xs text-slate-600 dark:text-slate-400">{body}</p>
+      <Link to={to} className={`self-start rounded-lg px-3 py-1.5 text-xs font-semibold ${s.btn}`}>
+        {cta}
+      </Link>
+    </div>
+  )
+}
+
+function AiActionCards({
+  criticalNow, revTrend, ordersCur, aiScore,
+  canCatalog, canFinance, canSales, canForecast,
+}: {
+  criticalNow: number
+  revTrend: { pct: number | null; positive: boolean }
+  ordersCur: number
+  aiScore: { score: number | null }
+  canCatalog: boolean
+  canFinance: boolean
+  canSales: boolean
+  canForecast: boolean
+}) {
+  const cards: ActionCardItem[] = []
+
+  if (canCatalog && criticalNow > 0) {
+    cards.push({
+      severity: criticalNow >= 5 ? "critical" : "warning",
+      title: `${criticalNow} ürün kritik stok altında`,
+      body: "Stok seviyesi yeniden sipariş eşiğinin altına düşmüş kalemler tedarik gerektiriyor.",
+      to: "/stock",
+      cta: "Stok Görüntüle",
+    })
+  }
+
+  if (canFinance && revTrend.pct !== null && revTrend.pct < -10) {
+    cards.push({
+      severity: "warning",
+      title: `Ciro %${Math.abs(revTrend.pct).toFixed(0)} düştü`,
+      body: "Önceki 30 güne kıyasla gelirde anlamlı bir gerileme tespit edildi.",
+      to: "/finance",
+      cta: "Finans Analizine Git",
+    })
+  }
+
+  if (canSales && ordersCur === 0) {
+    cards.push({
+      severity: "info",
+      title: "Son 30 günde satış yok",
+      body: "Henüz satış kaydı oluşturulmamış. İlk siparişi girin veya ekibinizi bilgilendirin.",
+      to: "/sales",
+      cta: "Satış Sayfasına Git",
+    })
+  }
+
+  if (canForecast && aiScore.score !== null && aiScore.score < 70) {
+    cards.push({
+      severity: "info",
+      title: `AI tahmin uyumu düşük (%${aiScore.score})`,
+      body: "Satış tahminleri gerçekleşenlerle örtüşmüyor. Tahmin modelini güncellemek veya veri kalitesini artırmak faydalı olabilir.",
+      to: "/ai",
+      cta: "AI Paneline Git",
+    })
+  }
+
+  if (cards.length === 0) {
+    return (
+      <div className="rounded-2xl border border-emerald-200 bg-emerald-50 px-5 py-4 dark:border-emerald-500/30 dark:bg-emerald-950/30">
+        <p className="text-sm font-medium text-emerald-800 dark:text-emerald-200">
+          Sistem sağlıklı — şu an dikkat gerektiren kritik aksiyon yok.
+        </p>
+      </div>
+    )
+  }
+
+  return (
+    <div>
+      <h2 className="mb-3 text-sm font-semibold text-slate-700 dark:text-slate-300">AI Aksiyon Önerileri</h2>
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+        {cards.map((c, i) => (
+          <ActionCard key={i} {...c} />
+        ))}
+      </div>
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
 // Admin quick-action cards
 // ---------------------------------------------------------------------------
 
@@ -482,6 +602,19 @@ export function DashboardPage() {
             );
           })}
         </div>
+      )}
+
+      {!loading && (
+        <AiActionCards
+          criticalNow={criticalNow}
+          revTrend={revTrend}
+          ordersCur={ordersCur}
+          aiScore={aiScore}
+          canCatalog={canCatalog}
+          canFinance={canFinance}
+          canSales={canSales}
+          canForecast={canForecast}
+        />
       )}
 
       {canSales && (
