@@ -1,4 +1,4 @@
-"""AI bildirim WebSocket: bağlantı yönetimi + anomali simülasyon döngüsü."""
+"""AI bildirim WebSocket: tenant-aware bağlantı yönetimi + anomali simülasyon döngüsü."""
 
 from __future__ import annotations
 
@@ -13,63 +13,102 @@ from fastapi import WebSocket
 from sqlalchemy import select
 
 from app.core.db import SessionLocal
+from app.models.product import Product
 from app.models.tenant import Tenant
 from app.services.inventory_service import list_ws_anomaly_candidate_products
 
 logger = structlog.get_logger(__name__)
 
-# Aynı ürün için tekrarlı WS spam'ini azaltır (saniye).
 _WS_ANOMALY_COOLDOWN_SEC = 600.0
 _ws_anomaly_lock = threading.Lock()
 _ws_anomaly_last_sent_by_product: dict[int, float] = {}
 
 
 class ConnectionManager:
-    """Aktif WebSocket oturumlarını tutar; JSON yayınlar."""
+    """Aktif WebSocket oturumlarını tenant_id'ye göre tutar."""
 
     def __init__(self) -> None:
-        self._connections: list[WebSocket] = []
+        self._by_tenant: dict[int, list[WebSocket]] = {}
+        self._admin_sockets: set[WebSocket] = set()
 
     @property
     def connection_count(self) -> int:
-        return len(self._connections)
+        return sum(len(lst) for lst in self._by_tenant.values())
 
-    async def connect(self, websocket: WebSocket) -> None:
+    @property
+    def admin_connected(self) -> bool:
+        return bool(self._admin_sockets)
+
+    def active_tenant_ids(self) -> list[int]:
+        return [tid for tid, lst in self._by_tenant.items() if lst]
+
+    async def connect(self, websocket: WebSocket, tenant_id: int, role: str = "") -> None:
         await websocket.accept()
-        self._connections.append(websocket)
-        logger.info("ws_notification_connected", active=self.connection_count)
+        self._by_tenant.setdefault(tenant_id, []).append(websocket)
+        if role == "admin":
+            self._admin_sockets.add(websocket)
+        logger.info("ws_notification_connected", tenant_id=tenant_id, role=role, active=self.connection_count)
 
-    def disconnect(self, websocket: WebSocket) -> None:
+    def disconnect(self, websocket: WebSocket, tenant_id: int) -> None:
+        lst = self._by_tenant.get(tenant_id, [])
         try:
-            self._connections.remove(websocket)
+            lst.remove(websocket)
         except ValueError:
-            return
-        logger.info("ws_notification_disconnected", active=self.connection_count)
+            pass
+        self._admin_sockets.discard(websocket)
+        logger.info("ws_notification_disconnected", tenant_id=tenant_id, active=self.connection_count)
 
-    async def broadcast_json(self, payload: dict[str, Any]) -> None:
-        if not self._connections:
+    async def broadcast_to_tenant(self, tenant_id: int, payload: dict[str, Any]) -> None:
+        lst = self._by_tenant.get(tenant_id, [])
+        if not lst:
             return
         stale: list[WebSocket] = []
-        for ws in list(self._connections):
+        for ws in list(lst):
             try:
                 await ws.send_json(payload)
             except Exception:
                 stale.append(ws)
         for ws in stale:
-            self.disconnect(ws)
+            try:
+                lst.remove(ws)
+            except ValueError:
+                pass
+
+    async def broadcast_to_admins(self, payload: dict[str, Any]) -> None:
+        stale: list[WebSocket] = []
+        for ws in list(self._admin_sockets):
+            try:
+                await ws.send_json(payload)
+            except Exception:
+                stale.append(ws)
+        for ws in stale:
+            self._admin_sockets.discard(ws)
+
+    async def broadcast_all(self, payload: dict[str, Any]) -> None:
+        for tid in list(self._by_tenant.keys()):
+            await self.broadcast_to_tenant(tid, payload)
 
 
 notification_manager = ConnectionManager()
 
 
-def _build_simulated_ws_payload() -> dict[str, Any] | None:
-    """DB'den (varsayılan kiracı) ürün seçer; cooldown içindeki ürünleri atlar."""
+def _get_tenant_name(tenant_id: int) -> str:
+    """DB'den tenant adını senkron olarak alır (asyncio.to_thread içinde çağrılır)."""
     db = SessionLocal()
     try:
-        tid = db.scalar(select(Tenant.id).where(Tenant.slug == "default"))
-        if tid is None:
-            return None
-        pool = list_ws_anomaly_candidate_products(db, int(tid))
+        t = db.get(Tenant, tenant_id)
+        return t.name if t and t.name else f"Tenant #{tenant_id}"
+    except Exception:
+        return f"Tenant #{tenant_id}"
+    finally:
+        db.close()
+
+
+def _build_tenant_ws_payload(tenant_id: int) -> dict[str, Any] | None:
+    """DB'den verilen tenant'ın ürünlerini seçer; cooldown içindeki ürünleri atlar."""
+    db = SessionLocal()
+    try:
+        pool = list_ws_anomaly_candidate_products(db, tenant_id)
         if not pool:
             return None
         now = time.monotonic()
@@ -80,17 +119,27 @@ def _build_simulated_ws_payload() -> dict[str, Any] | None:
                 if now - _ws_anomaly_last_sent_by_product.get(pid, 0) >= _WS_ANOMALY_COOLDOWN_SEC
             ]
         if not eligible:
-            logger.debug("ws_anomaly_skip_cooldown", pool_size=len(pool))
+            logger.debug("ws_anomaly_skip_cooldown", tenant_id=tenant_id, pool_size=len(pool))
             return None
         product_id, sku = random.choice(eligible)
         with _ws_anomaly_lock:
             _ws_anomaly_last_sent_by_product[product_id] = now
+
+        # Ürün adını da ekle (SKU yanında daha anlamlı mesaj için)
+        product_name: str = sku
+        try:
+            p = db.scalar(select(Product).where(Product.id == product_id))
+            if p:
+                product_name = p.name
+        except Exception:
+            pass
+
         alert_type = random.choice(("warning", "info", "critical"))
         label = "Sipariş Taslağı Oluştur"
         endpoint = f"/api/inventory/{product_id}/auto-draft"
         return {
             "type": alert_type,
-            "message": f"AI Uyarısı: {sku} stokları beklenenden hızlı tükeniyor!",
+            "message": f"AI Uyarısı: {product_name} ({sku}) stokları beklenenden hızlı tükeniyor!",
             "action_label": label,
             "action_endpoint": endpoint,
             "action_type": "inventory.auto_draft",
@@ -103,16 +152,32 @@ def _build_simulated_ws_payload() -> dict[str, Any] | None:
 
 
 async def ai_anomaly_simulation_loop() -> None:
-    """Her 30–40 sn rastgele AI anomali mesajı üretir, tüm istemcilere gönderir (test)."""
+    """Her 30–40 sn aktif tenant'lar için ayrı ayrı anomali mesajı üretir.
+    Admin-role bağlantısı varsa tüm tenant'ların bildirimlerini cross-tenant olarak iletir."""
     while True:
         try:
             await asyncio.sleep(random.uniform(30.0, 40.0))
-            msg = await asyncio.to_thread(_build_simulated_ws_payload)
-            if msg is None:
-                logger.debug("ws_anomaly_skip_no_payload")
+            active_tids = notification_manager.active_tenant_ids()
+            if not active_tids:
                 continue
-            await notification_manager.broadcast_json(msg)
-            logger.debug("ws_anomaly_broadcast", connections=notification_manager.connection_count)
+            admin_connected = notification_manager.admin_connected
+            for tenant_id in active_tids:
+                msg = await asyncio.to_thread(_build_tenant_ws_payload, tenant_id)
+                if msg is None:
+                    continue
+                await notification_manager.broadcast_to_tenant(tenant_id, msg)
+                logger.debug("ws_anomaly_broadcast", tenant_id=tenant_id)
+                if admin_connected:
+                    tenant_name = await asyncio.to_thread(_get_tenant_name, tenant_id)
+                    admin_msg = {
+                        **msg,
+                        "message": f"[{tenant_name}] {msg['message']}",
+                        "cross_tenant": True,
+                        "source_tenant_id": tenant_id,
+                        "source_tenant_name": tenant_name,
+                    }
+                    await notification_manager.broadcast_to_admins(admin_msg)
+                    logger.debug("ws_anomaly_admin_forward", source_tenant_id=tenant_id)
         except asyncio.CancelledError:
             logger.info("ws_anomaly_loop_cancelled")
             raise

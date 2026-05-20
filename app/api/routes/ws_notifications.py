@@ -48,7 +48,7 @@ async def websocket_notifications(
         await websocket.close(code=1008, reason="geçersiz tenant kimliği")
         return
 
-    await notification_manager.connect(websocket, tenant_id)
+    await notification_manager.connect(websocket, tenant_id, role=role)
     try:
         while True:
             await websocket.receive_text()
