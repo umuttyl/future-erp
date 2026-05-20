@@ -74,6 +74,25 @@ class ConnectionManager:
             except ValueError:
                 pass
 
+    async def broadcast_to_tenant_non_admin(self, tenant_id: int, payload: dict[str, Any]) -> None:
+        """Tenant bağlantılarına yayın yapar; admin soketlerini hariç tutar."""
+        lst = self._by_tenant.get(tenant_id, [])
+        if not lst:
+            return
+        stale: list[WebSocket] = []
+        for ws in list(lst):
+            if ws in self._admin_sockets:
+                continue
+            try:
+                await ws.send_json(payload)
+            except Exception:
+                stale.append(ws)
+        for ws in stale:
+            try:
+                lst.remove(ws)
+            except ValueError:
+                pass
+
     async def broadcast_to_admins(self, payload: dict[str, Any]) -> None:
         stale: list[WebSocket] = []
         for ws in list(self._admin_sockets):
@@ -91,17 +110,6 @@ class ConnectionManager:
 
 notification_manager = ConnectionManager()
 
-
-def _get_tenant_name(tenant_id: int) -> str:
-    """DB'den tenant adını senkron olarak alır (asyncio.to_thread içinde çağrılır)."""
-    db = SessionLocal()
-    try:
-        t = db.get(Tenant, tenant_id)
-        return t.name if t and t.name else f"Tenant #{tenant_id}"
-    except Exception:
-        return f"Tenant #{tenant_id}"
-    finally:
-        db.close()
 
 
 def _build_tenant_ws_payload(tenant_id: int) -> dict[str, Any] | None:
@@ -151,9 +159,50 @@ def _build_tenant_ws_payload(tenant_id: int) -> dict[str, Any] | None:
         db.close()
 
 
+def _build_platform_summary_payload() -> dict[str, Any] | None:
+    """Tüm tenant'lardaki kritik stok durumunu toplayarak admin'e platform özeti üretir."""
+    db = SessionLocal()
+    try:
+        tenants = db.scalars(select(Tenant)).all()
+        total_critical = 0
+        tenant_issues: list[dict[str, Any]] = []
+
+        for t in tenants:
+            try:
+                pool = list_ws_anomaly_candidate_products(db, t.id)
+                if pool:
+                    count = len(pool)
+                    total_critical += count
+                    tenant_issues.append({
+                        "tenant_id": t.id,
+                        "tenant_name": t.name or f"Tenant #{t.id}",
+                        "critical_count": count,
+                    })
+            except Exception:
+                continue
+
+        if not tenant_issues:
+            return None
+
+        companies = len(tenant_issues)
+        severity = "critical" if total_critical >= 5 else "warning" if total_critical > 0 else "info"
+        message = f"Platform Özeti: {companies} şirkette {total_critical} kritik stok uyarısı"
+
+        return {
+            "type": severity,
+            "message": message,
+            "platform_summary": True,
+            "total_critical": total_critical,
+            "companies_affected": companies,
+            "tenant_issues": tenant_issues[:5],
+        }
+    finally:
+        db.close()
+
+
 async def ai_anomaly_simulation_loop() -> None:
-    """Her 30–40 sn aktif tenant'lar için ayrı ayrı anomali mesajı üretir.
-    Admin-role bağlantısı varsa tüm tenant'ların bildirimlerini cross-tenant olarak iletir."""
+    """Her 30–40 sn aktif tenant'lar için anomali mesajı üretir.
+    Admin bağlantısı için şirket bazlı değil platform geneli özet gönderilir."""
     while True:
         try:
             await asyncio.sleep(random.uniform(30.0, 40.0))
@@ -161,23 +210,21 @@ async def ai_anomaly_simulation_loop() -> None:
             if not active_tids:
                 continue
             admin_connected = notification_manager.admin_connected
+
+            # Şirket kullanıcılarına kendi tenant uyarıları (admin soketi hariç)
             for tenant_id in active_tids:
                 msg = await asyncio.to_thread(_build_tenant_ws_payload, tenant_id)
                 if msg is None:
                     continue
-                await notification_manager.broadcast_to_tenant(tenant_id, msg)
+                await notification_manager.broadcast_to_tenant_non_admin(tenant_id, msg)
                 logger.debug("ws_anomaly_broadcast", tenant_id=tenant_id)
-                if admin_connected:
-                    tenant_name = await asyncio.to_thread(_get_tenant_name, tenant_id)
-                    admin_msg = {
-                        **msg,
-                        "message": f"[{tenant_name}] {msg['message']}",
-                        "cross_tenant": True,
-                        "source_tenant_id": tenant_id,
-                        "source_tenant_name": tenant_name,
-                    }
-                    await notification_manager.broadcast_to_admins(admin_msg)
-                    logger.debug("ws_anomaly_admin_forward", source_tenant_id=tenant_id)
+
+            # Admin'e platform geneli özet gönder
+            if admin_connected:
+                summary = await asyncio.to_thread(_build_platform_summary_payload)
+                if summary:
+                    await notification_manager.broadcast_to_admins(summary)
+                    logger.debug("ws_anomaly_platform_summary_sent", companies=summary.get("companies_affected"))
         except asyncio.CancelledError:
             logger.info("ws_anomaly_loop_cancelled")
             raise

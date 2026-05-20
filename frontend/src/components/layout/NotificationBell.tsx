@@ -198,9 +198,13 @@ export function NotificationBell() {
 
   const handleCardActivate = (row: StoredNotification) => {
     markRead(row.id)
-    const pid = resolveWsNotificationProductId(row.payload)
-    if (pid != null) navigate(`/stock?productId=${pid}`)
-    else navigate('/stock')
+    if (row.payload.platform_summary) {
+      navigate('/admin')
+    } else {
+      const pid = resolveWsNotificationProductId(row.payload)
+      if (pid != null) navigate(`/stock?productId=${pid}`)
+      else navigate('/stock')
+    }
     setDropdownOpen(false)
   }
 
@@ -300,8 +304,9 @@ export function NotificationBell() {
               ) : (
                 <ul className="space-y-1">
                   {items.map((row) => {
-                    const actionLabel = wsNotificationActionLabel(row.payload)
-                    const productId = resolveWsNotificationProductId(row.payload)
+                    const isPlatformSummary = Boolean(row.payload.platform_summary)
+                    const actionLabel = isPlatformSummary ? null : wsNotificationActionLabel(row.payload)
+                    const productId = isPlatformSummary ? null : resolveWsNotificationProductId(row.payload)
                     const busy = Boolean(actionBusy[row.id])
                     const showAction = Boolean(actionLabel && productId != null)
 
@@ -321,22 +326,30 @@ export function NotificationBell() {
                             'w-full cursor-pointer rounded-xl px-3 py-2.5 text-left outline-none transition focus-visible:ring-2 focus-visible:ring-violet-500/60',
                             row.read
                               ? 'opacity-70 hover:bg-slate-50 dark:hover:bg-white/5'
-                              : 'bg-violet-50/80 hover:bg-violet-100/90 dark:bg-violet-950/30 dark:hover:bg-violet-950/50',
+                              : isPlatformSummary
+                                ? 'bg-red-50/80 hover:bg-red-100/70 dark:bg-red-950/20 dark:hover:bg-red-950/40'
+                                : 'bg-violet-50/80 hover:bg-violet-100/90 dark:bg-violet-950/30 dark:hover:bg-violet-950/50',
                           ].join(' ')}
                         >
                           <div className="flex items-center gap-2">
-                            <span
-                              className={[
-                                'rounded-md px-1.5 py-0.5 text-[10px] font-semibold uppercase',
-                                mapPayloadKind(row.payload.type || 'info') === 'critical'
-                                  ? 'bg-rose-100 text-rose-800 dark:bg-rose-950/50 dark:text-rose-200'
-                                  : mapPayloadKind(row.payload.type || 'info') === 'warning'
-                                    ? 'bg-amber-100 text-amber-900 dark:bg-amber-950/50 dark:text-amber-100'
-                                    : 'bg-sky-100 text-sky-900 dark:bg-sky-950/50 dark:text-sky-100',
-                              ].join(' ')}
-                            >
-                              {row.payload.type || 'info'}
-                            </span>
+                            {isPlatformSummary ? (
+                              <span className="rounded-md bg-red-100 px-1.5 py-0.5 text-[10px] font-semibold uppercase text-red-700 dark:bg-red-950/50 dark:text-red-300">
+                                Platform
+                              </span>
+                            ) : (
+                              <span
+                                className={[
+                                  'rounded-md px-1.5 py-0.5 text-[10px] font-semibold uppercase',
+                                  mapPayloadKind(row.payload.type || 'info') === 'critical'
+                                    ? 'bg-rose-100 text-rose-800 dark:bg-rose-950/50 dark:text-rose-200'
+                                    : mapPayloadKind(row.payload.type || 'info') === 'warning'
+                                      ? 'bg-amber-100 text-amber-900 dark:bg-amber-950/50 dark:text-amber-100'
+                                      : 'bg-sky-100 text-sky-900 dark:bg-sky-950/50 dark:text-sky-100',
+                                ].join(' ')}
+                              >
+                                {row.payload.type || 'info'}
+                              </span>
+                            )}
                             <span className="text-[10px] text-slate-400">
                               {new Date(row.receivedAt).toLocaleString('tr-TR', {
                                 day: '2-digit',
@@ -347,7 +360,21 @@ export function NotificationBell() {
                             </span>
                           </div>
                           <p className="mt-1 line-clamp-2 text-xs text-slate-800 dark:text-slate-200">{row.payload.message}</p>
-                          {row.payload.product_sku ? (
+
+                          {isPlatformSummary && row.payload.tenant_issues && row.payload.tenant_issues.length > 0 ? (
+                            <ul className="mt-1.5 space-y-0.5">
+                              {row.payload.tenant_issues.map((ti) => (
+                                <li key={ti.tenant_id} className="flex items-center justify-between text-[10px] text-slate-500 dark:text-slate-400">
+                                  <span className="truncate">{ti.tenant_name}</span>
+                                  <span className="ml-2 shrink-0 rounded bg-rose-100 px-1 py-0.5 font-semibold text-rose-700 dark:bg-rose-950/40 dark:text-rose-300">
+                                    {ti.critical_count} ürün
+                                  </span>
+                                </li>
+                              ))}
+                            </ul>
+                          ) : null}
+
+                          {!isPlatformSummary && row.payload.product_sku ? (
                             <p className="mt-0.5 font-mono text-[10px] text-slate-500 dark:text-slate-400">{row.payload.product_sku}</p>
                           ) : null}
 

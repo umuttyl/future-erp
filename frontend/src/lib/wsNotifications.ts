@@ -11,6 +11,11 @@ export type WsAiNotificationPayload = {
   action_type?: string
   product_id?: number
   product_sku?: string
+  /** Admin'e gönderilen platform geneli özet bildirimi */
+  platform_summary?: boolean
+  total_critical?: number
+  companies_affected?: number
+  tenant_issues?: Array<{ tenant_id: number; tenant_name: string; critical_count: number }>
 }
 
 export function resolveWsNotificationProductId(p: WsAiNotificationPayload): number | null {
