@@ -387,3 +387,55 @@ class TestModuleTableMapNoGhostTables:
         assert "quantity_change" not in prompt  # P0-2'de duzeltildi: 'change' kolonu
         assert "contact_name" not in prompt     # 'contact_person' olmali
         assert "is_ai_override" not in prompt   # supply_orders'da yok
+
+
+# ---------------------------------------------------------------------------
+# P0-5: schema_doc metadata-driven
+# ---------------------------------------------------------------------------
+
+
+class TestSchemaDocMetadataDriven:
+    def test_schema_doc_reflects_actual_models(self):
+        """build_nlp_schema_doc Base.metadata'dan üretilmeli; ghost tablo/kolon yok."""
+        import app.models  # noqa: F401
+        from app.models.base import Base
+        from app.services._schema_doc import build_nlp_schema_doc
+
+        doc = build_nlp_schema_doc(Base.metadata)
+        assert "finance_records" not in doc
+        assert "employees" not in doc
+        assert "change" in doc          # stock_movements.change
+        assert "customer_type" in doc   # customers.customer_type
+        assert "contact_person" in doc  # suppliers.contact_person
+        assert "quantity_change" not in doc
+        assert "contact_name" not in doc
+
+    def test_schema_doc_admin_includes_tenants_and_users(self):
+        import app.models  # noqa: F401
+        from app.models.base import Base
+        from app.services._schema_doc import build_nlp_schema_doc
+
+        doc = build_nlp_schema_doc(Base.metadata, include_admin=True)
+        assert "Table: tenants" in doc
+        assert "Table: users" in doc
+
+    def test_schema_doc_non_admin_excludes_tenants_and_users(self):
+        import app.models  # noqa: F401
+        from app.models.base import Base
+        from app.services._schema_doc import build_nlp_schema_doc
+
+        doc = build_nlp_schema_doc(Base.metadata, include_admin=False)
+        assert "Table: tenants" not in doc
+        assert "Table: users" not in doc
+
+    def test_prompt_uses_metadata_schema(self):
+        """_unified_nlp_system_prompt schema blogu metadata'dan gelmeli."""
+        prompt = _unified_nlp_system_prompt("manager", active_modules=None)
+        assert "auto-generated from SQLAlchemy metadata" in prompt
+        assert "contact_person" in prompt
+        assert "customer_type" in prompt
+
+    def test_sqlglot_dialect_dev_is_sqlite(self):
+        from app.services.nlp_assistant import _sqlglot_dialect
+        dialect = _sqlglot_dialect()
+        assert dialect in ("sqlite", "postgres")

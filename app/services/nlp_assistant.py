@@ -15,8 +15,11 @@ from sqlalchemy import text
 from sqlalchemy.engine import Result
 from sqlalchemy.orm import Session
 
+import app.models  # noqa: F401 — ensure all models are registered in Base.metadata
 from app.core.config import settings
 from app.core.module_config import ModuleKey, allowed_tables_for_modules
+from app.models.base import Base
+from app.services._schema_doc import build_nlp_schema_doc, nlp_table_whitelist
 
 logger = structlog.get_logger(__name__)
 
@@ -25,20 +28,10 @@ NLP_FRIENDLY_DB_FAILURE = (
 )
 
 # Varsayılan tablo whitelist (geriye uyumluluk için korunur)
-ALLOWED_TABLES = {
-    "products",
-    "sales_records",
-    "sales_items",
-    "sales_forecast_results",
-    "stock_movements",
-}
+ALLOWED_TABLES = nlp_table_whitelist(include_admin=False)
 
 # Admin: tüm platform tablolarına erişim (cross-tenant)
-_ADMIN_ALL_TABLES: set[str] = {
-    "products", "sales_records", "sales_items", "sales_forecast_results",
-    "stock_movements", "customers", "suppliers",
-    "supply_orders", "tenants", "users",
-}
+_ADMIN_ALL_TABLES: set[str] = nlp_table_whitelist(include_admin=True)
 
 # Role bazında erişilebilir tablolar (module_config'den bağımsız ek kısıtlar)
 _ROLE_TABLE_RESTRICTIONS: dict[str, set[str]] = {
@@ -202,16 +195,10 @@ def _unified_nlp_system_prompt(
             "- Şirket adı için tenants tablosunu JOIN edebilirsin (tenants.id = <tablo>.tenant_id).\n"
             "- Tenant bazlı gruplama: GROUP BY tenant_id veya GROUP BY t.name (JOIN tenants t ON t.id = tenant_id)."
         )
-        extra_schema = """
-Table: tenants
-  - id, slug, name, sector, is_active, created_at
-
-Table: users
-  - id, tenant_id, email, full_name, role ('admin'|'manager'|'employee')
-"""
     else:
         tenant_filter_rule = "- Every referenced table MUST be filtered with tenant_id = :tid (bind :tid)"
-        extra_schema = ""
+
+    schema_doc = build_nlp_schema_doc(Base.metadata, include_admin=is_admin)
 
     return f"""You are the Future ERP AI assistant (Sen Future ERP AI asistanısın).
 
@@ -241,30 +228,9 @@ Database query:
 ALLOWED TABLES for this user: {allowed_tables_list}
 DO NOT reference any table not in this list.
 
-Schema (SQLite-friendly):{extra_schema}
-Table: products
-  - id, tenant_id (int, fk), sku, name, category, unit_price, cost_price, stock_quantity, reorder_level
+Schema (auto-generated from SQLAlchemy metadata):
 
-Table: sales_records
-  - id, tenant_id, record_no, sale_date, customer_name, total_amount
-
-Table: sales_items
-  - id, tenant_id, sales_record_id, product_id, quantity, unit_price, line_total
-
-Table: sales_forecast_results
-  - id, tenant_id, model_name, scope, product_id, forecast_start, horizon_days, result_payload, created_at
-
-Table: stock_movements
-  - id, tenant_id, product_id, movement_type ('in'|'out'|'adjust'), change, balance_after, reference, created_at
-
-Table: customers
-  - id, tenant_id, name, email, phone, address, customer_type, notes, created_at
-
-Table: suppliers
-  - id, tenant_id, name, contact_person, email, phone, payment_terms, notes, created_at
-
-Table: supply_orders
-  - id, tenant_id, product_id, quantity, status, created_at
+{schema_doc}
 
 SQL rules (only when reply_type is "sql"):
 - sql MUST be a single SELECT (no INSERT/UPDATE/DELETE/DDL, no multiple statements)
@@ -326,6 +292,14 @@ def _extract_json(text_out: str) -> Dict[str, Any]:
     return json.loads(m.group(0))
 
 
+def _sqlglot_dialect() -> str:
+    from sqlalchemy.engine import make_url
+    drv = make_url(settings.DATABASE_URL).drivername
+    if drv.startswith("postgres"):
+        return "postgres"
+    return "sqlite"
+
+
 def _validate_sql(
     sql: str,
     allowed_tables: set[str] | None = None,
@@ -339,7 +313,7 @@ def _validate_sql(
         raise UnsafeSQL("SQL comments are not allowed.")
 
     try:
-        expr = sqlglot.parse_one(raw, read="postgres")
+        expr = sqlglot.parse_one(raw, read=_sqlglot_dialect())
     except Exception as e:  # pragma: no cover
         raise UnsafeSQL(f"SQL parse failed: {e}") from e
 
