@@ -50,7 +50,7 @@ async def lifespan(app: FastAPI):
     ensure_dev_demo_users_if_empty()
 
     ws_anomaly_task: asyncio.Task[None] | None = None
-    if settings.ENV.lower() != "prod":
+    if not settings.is_production:
         from app.realtime.notification_ws_hub import spawn_anomaly_simulation_task
 
         ws_anomaly_task = spawn_anomaly_simulation_task()

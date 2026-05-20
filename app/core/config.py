@@ -20,7 +20,7 @@ class Settings(BaseSettings):
     @classmethod
     def _validate_jwt_secret(cls, v: str, info: object) -> str:
         env = getattr(info, "data", {}).get("ENV", "dev")
-        if str(env).lower() == "production":
+        if str(env).lower() in ("prod", "production"):
             if len(v) < 48 or v == _DEFAULT_JWT_KEY:
                 raise ValueError(
                     "JWT_SECRET_KEY üretim ortamında en az 48 karakter olmalı ve varsayılan değer kullanılmamalı."

@@ -30,7 +30,7 @@ def configure_logging() -> None:
         structlog.dev.set_exc_info,
     ]
 
-    if settings.ENV == "prod":
+    if settings.is_production:
         shared.append(structlog.processors.JSONRenderer())
     else:
         shared.append(structlog.dev.ConsoleRenderer(colors=True))
