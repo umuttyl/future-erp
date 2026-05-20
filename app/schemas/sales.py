@@ -26,6 +26,7 @@ class SalesItemOut(SalesItemBase):
 class SalesRecordBase(BaseModel):
     record_no: str = Field(min_length=1, max_length=64)
     sale_date: date
+    customer_id: Optional[int] = None
     customer_name: Optional[str] = Field(default=None, max_length=255)
 
 

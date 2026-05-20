@@ -7,6 +7,7 @@ from typing import List, Optional
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session, selectinload
 
+from app.models.customer import Customer
 from app.models.product import Product
 from app.models.sales import SalesItem, SalesRecord
 from app.models.stock_movement import StockMovement
@@ -92,11 +93,25 @@ class SalesService(TenantScopedService[SalesRecord]):
         ]
 
     def create_record(self, db: Session, tenant_id: int, data: SalesRecordCreate) -> SalesRecord:
+        # customer_id verilmişse CRM'den adı otomatik doldur
+        resolved_name = data.customer_name
+        if data.customer_id is not None:
+            cust = db.scalar(
+                select(Customer).where(
+                    Customer.id == data.customer_id,
+                    Customer.tenant_id == tenant_id,
+                    Customer.deleted_at.is_(None),
+                )
+            )
+            if cust:
+                resolved_name = cust.name
+
         record = SalesRecord(
             tenant_id=tenant_id,
             record_no=data.record_no,
             sale_date=data.sale_date,
-            customer_name=data.customer_name,
+            customer_id=data.customer_id if data.customer_id else None,
+            customer_name=resolved_name,
             total_amount=Decimal("0"),
         )
 

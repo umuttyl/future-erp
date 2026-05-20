@@ -18,6 +18,9 @@ class SalesRecord(Base):
     tenant_id: Mapped[int] = mapped_column(ForeignKey("tenants.id", ondelete="CASCADE"), index=True)
     record_no: Mapped[str] = mapped_column(String(64), index=True)
     sale_date: Mapped[date] = mapped_column(Date, index=True)
+    customer_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("customers.id", ondelete="SET NULL"), nullable=True, index=True
+    )
     customer_name: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     total_amount: Mapped[Decimal] = mapped_column(Numeric(14, 2), default=0)
 
@@ -41,7 +44,7 @@ class SalesItem(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     tenant_id: Mapped[int] = mapped_column(ForeignKey("tenants.id", ondelete="CASCADE"), index=True)
     sales_record_id: Mapped[int] = mapped_column(ForeignKey("sales_records.id", ondelete="CASCADE"), index=True)
-    product_id: Mapped[int] = mapped_column(ForeignKey("products.id"), index=True)
+    product_id: Mapped[int] = mapped_column(ForeignKey("products.id", ondelete="CASCADE"), index=True)
 
     quantity: Mapped[int] = mapped_column(Integer)
     unit_price: Mapped[Decimal] = mapped_column(Numeric(12, 2))

@@ -268,6 +268,7 @@ export type SalesRecord = {
   id: number;
   record_no: string;
   sale_date: string;
+  customer_id?: number | null;
   customer_name?: string | null;
   total_amount: string | number;
   created_at: string;
