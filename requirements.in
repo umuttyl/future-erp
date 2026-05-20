@@ -1,0 +1,27 @@
+# Production dependencies — compiled to requirements.txt via:
+#   pip-compile requirements.in -o requirements.txt
+#
+# Edit THIS file to add/upgrade packages. Never edit requirements.txt directly.
+
+fastapi
+uvicorn[standard]
+slowapi>=0.1.9
+pyjwt>=2.8.0
+argon2-cffi>=23.1.0
+pydantic
+pydantic-settings
+email-validator>=2.0.0
+SQLAlchemy>=2.0
+alembic>=1.13
+psycopg[binary]
+python-dotenv
+structlog>=24.0
+Faker>=30.0
+pandas
+numpy
+scikit-learn
+prophet
+openai
+sqlglot
+google-generativeai
+google-genai

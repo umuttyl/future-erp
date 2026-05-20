@@ -1,0 +1,11 @@
+# Dev/tooling dependencies — compiled to requirements-dev.txt via:
+#   pip-compile requirements-dev.in -o requirements-dev.txt
+#
+# Includes all production deps plus dev-only extras.
+
+-r requirements.in
+
+pip-tools
+pytest
+pytest-asyncio
+httpx
