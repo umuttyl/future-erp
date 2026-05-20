@@ -4,7 +4,7 @@
  * Verifies that:
  * 1. App default export exists
  * 2. Lazy imports resolve (no missing modules)
- * 3. PageFallback spinner renders while chunks load
+ * 3. LoadingState spinner renders while chunks load (via Suspense fallback)
  */
 import { describe, expect, it, vi } from "vitest";
 

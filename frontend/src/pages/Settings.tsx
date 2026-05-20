@@ -18,6 +18,8 @@ import {
   Wallet,
   Zap,
 } from "lucide-react";
+
+import { LoadingState } from "../components/ui/LoadingState";
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 
@@ -302,11 +304,7 @@ function CompanyModuleSettings() {
   }
 
   if (loading) {
-    return (
-      <div className="flex min-h-[400px] items-center justify-center">
-        <RefreshCw className="h-8 w-8 animate-spin text-violet-500" />
-      </div>
-    );
+    return <LoadingState />;
   }
 
   const SECTOR_LABELS: Record<string, string> = {

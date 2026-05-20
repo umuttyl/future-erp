@@ -1,8 +1,10 @@
 import { Suspense, lazy } from "react";
 import { Navigate, Route, Routes } from "react-router-dom";
 
+import { ErrorBoundary } from "./components/ErrorBoundary";
 import { NlpAssistantBubble } from "./components/NlpAssistantBubble";
 import { RequireAuth } from "./components/RequireAuth";
+import { LoadingState } from "./components/ui/LoadingState";
 import { AppShell } from "./layout/AppShell";
 
 // Lazy-loaded pages — each gets its own JS chunk
@@ -21,22 +23,11 @@ const HrPage          = lazy(() => import("./pages/Hr").then((m) => ({ default: 
 const SettingsPage    = lazy(() => import("./pages/Settings"));
 const AdminPage       = lazy(() => import("./pages/Admin"));
 
-function PageFallback() {
-  return (
-    <div className="flex min-h-[40vh] items-center justify-center">
-      <div
-        className="h-8 w-8 animate-spin rounded-full border-2 border-slate-200 border-t-violet-600 dark:border-slate-700 dark:border-t-violet-400"
-        role="status"
-        aria-label="Yükleniyor"
-      />
-    </div>
-  );
-}
-
 function App() {
   return (
     <>
-      <Suspense fallback={<PageFallback />}>
+      <ErrorBoundary>
+      <Suspense fallback={<LoadingState label={false} />}>
         <Routes>
           <Route path="/login"  element={<LoginPage />} />
           <Route path="/signup" element={<SignupPage />} />
@@ -66,6 +57,7 @@ function App() {
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </Suspense>
+      </ErrorBoundary>
       <NlpAssistantBubble />
     </>
   );
