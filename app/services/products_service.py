@@ -31,9 +31,7 @@ class ProductsService(TenantScopedService[Product]):
             reorder_level=data.reorder_level,
         )
         db.add(obj)
-        db.commit()
-        db.refresh(obj)
-
+        db.flush()  # obj.id atanır, henüz commit edilmez
         if obj.stock_quantity > 0:
             db.add(
                 StockMovement(
@@ -46,8 +44,8 @@ class ProductsService(TenantScopedService[Product]):
                     note="Ürün oluşturulurken girilen başlangıç stoğu",
                 )
             )
-            db.commit()
-
+        db.commit()  # tek atomik commit
+        db.refresh(obj)
         return obj
 
     def update(self, db: Session, tenant_id: int, product: Product, data: ProductUpdate) -> Product:

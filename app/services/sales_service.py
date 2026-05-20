@@ -135,10 +135,9 @@ class SalesService(TenantScopedService[SalesRecord]):
         db.add(record)
         for p in touched_products:
             db.add(p)
-        db.commit()
-        db.refresh(record)
+        db.flush()  # record.id atanır, henüz commit edilmez
 
-        for it, p in zip(record.items, touched_products):
+        for it, p in zip(items, touched_products):
             db.add(
                 StockMovement(
                     tenant_id=tenant_id,
@@ -150,7 +149,8 @@ class SalesService(TenantScopedService[SalesRecord]):
                     note=f"Satış {record.record_no}",
                 )
             )
-        db.commit()
+        db.commit()  # tek atomik commit
+        db.refresh(record)
 
         return self.get_record(db, tenant_id, record.id) or record
 
