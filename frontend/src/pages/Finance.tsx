@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 
+import { SkeletonCard, SkeletonKpiGrid } from '../components/ui/Skeleton'
 import {
   Bar,
   BarChart,
@@ -44,8 +46,14 @@ export function FinancePage() {
   const gridStroke = isDark ? '#334155' : '#cbd5e1'
   const axisStroke = isDark ? '#94a3b8' : '#64748b'
 
-  const [start, setStart] = useState(isoDaysAgo(90))
-  const [end, setEnd] = useState(isoToday())
+  const [searchParams, setSearchParams] = useSearchParams()
+  const [start, setStart] = useState(() => searchParams.get('start') ?? isoDaysAgo(90))
+  const [end, setEnd] = useState(() => searchParams.get('end') ?? isoToday())
+
+  // Applied values come from URL — source of truth for data loading
+  const appliedStart = searchParams.get('start') ?? isoDaysAgo(90)
+  const appliedEnd = searchParams.get('end') ?? isoToday()
+
   const [summary, setSummary] = useState<FinanceSummary | null>(null)
   const [monthly, setMonthly] = useState<MonthlyPoint[]>([])
   const [customers, setCustomers] = useState<TopCustomer[]>([])
@@ -78,9 +86,9 @@ export function FinancePage() {
   }
 
   useEffect(() => {
-    void load(start, end)
+    void load(appliedStart, appliedEnd)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+  }, [appliedStart, appliedEnd])
 
   const topProductsMaxRevenue = useMemo(
     () => topProducts.reduce((acc, p) => Math.max(acc, p.revenue), 0) || 1,
@@ -103,7 +111,11 @@ export function FinancePage() {
           <LabeledField label="Bitiş">
             <input type="date" value={end} onChange={(e) => setEnd(e.target.value)} className={inputFieldClass} />
           </LabeledField>
-          <button type="button" onClick={() => void load(start, end)} className={primaryButtonClass + ' self-end'}>
+          <button
+            type="button"
+            onClick={() => setSearchParams({ start, end }, { replace: true })}
+            className={primaryButtonClass + ' self-end'}
+          >
             Uygula
           </button>
         </div>
@@ -115,7 +127,8 @@ export function FinancePage() {
         </div>
       ) : null}
 
-      <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
+      {loading && !summary ? <SkeletonKpiGrid count={4} /> : null}
+      <div className={`grid grid-cols-2 gap-4 md:grid-cols-4 ${loading && !summary ? 'hidden' : ''}`}>
         <Kpi label="Ciro" value={summary ? formatCurrency(summary.revenue) : '…'} accent="violet" />
         <Kpi
           label="Brüt Kâr"
@@ -143,7 +156,7 @@ export function FinancePage() {
         />
         <div className="h-[320px]">
           {loading && monthly.length === 0 ? (
-            <div className="text-sm text-slate-500 dark:text-slate-400">Yükleniyor…</div>
+            <SkeletonCard rows={5} />
           ) : (
             <ResponsiveContainer width="100%" height="100%">
               <ComposedChart data={monthly} margin={{ top: 10, right: 16, left: 0, bottom: 0 }}>
