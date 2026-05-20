@@ -4,13 +4,13 @@ from datetime import date
 from decimal import Decimal
 from typing import List, Optional
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session, selectinload
 
 from app.models.product import Product
 from app.models.sales import SalesItem, SalesRecord
 from app.models.stock_movement import StockMovement
-from app.schemas.sales import SalesRecordCreate
+from app.schemas.sales import DailySalesPoint, SalesRecordCreate
 
 
 class SalesService:
@@ -24,6 +24,7 @@ class SalesService:
         customer: Optional[str] = None,
         search: Optional[str] = None,
         min_amount: Optional[float] = None,
+        skip: int = 0,
         limit: int = 500,
     ) -> List[SalesRecord]:
         stmt = (
@@ -31,6 +32,7 @@ class SalesService:
             .options(selectinload(SalesRecord.items))
             .where(SalesRecord.tenant_id == tenant_id)
             .order_by(SalesRecord.sale_date.desc(), SalesRecord.id.desc())
+            .offset(skip)
             .limit(limit)
         )
         if start_date is not None:
@@ -56,6 +58,36 @@ class SalesService:
             .where(SalesRecord.id == record_id, SalesRecord.tenant_id == tenant_id)
         )
         return db.scalar(stmt)
+
+    def daily_sales_points(
+        self,
+        db: Session,
+        tenant_id: int,
+        *,
+        start_date: Optional[date] = None,
+        end_date: Optional[date] = None,
+    ) -> List[DailySalesPoint]:
+        stmt = (
+            select(
+                SalesRecord.sale_date.label("date"),
+                func.coalesce(func.sum(SalesItem.quantity), 0).label("quantity"),
+                func.coalesce(func.sum(SalesItem.line_total), 0).label("revenue"),
+            )
+            .join(SalesItem, SalesItem.sales_record_id == SalesRecord.id)
+            .where(SalesRecord.tenant_id == tenant_id)
+            .where(SalesItem.tenant_id == tenant_id)
+            .group_by(SalesRecord.sale_date)
+            .order_by(SalesRecord.sale_date.asc())
+        )
+        if start_date is not None:
+            stmt = stmt.where(SalesRecord.sale_date >= start_date)
+        if end_date is not None:
+            stmt = stmt.where(SalesRecord.sale_date <= end_date)
+        rows = db.execute(stmt).all()
+        return [
+            DailySalesPoint(date=r.date, quantity=int(r.quantity), revenue=float(r.revenue))
+            for r in rows
+        ]
 
     def create_record(self, db: Session, tenant_id: int, data: SalesRecordCreate) -> SalesRecord:
         record = SalesRecord(

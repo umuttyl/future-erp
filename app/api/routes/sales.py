@@ -2,16 +2,13 @@ from datetime import date
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, status
-from pydantic import BaseModel
-from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.core.db import get_db
 from app.core.deps import TenantContext, get_tenant_ctx, require_permission
 from app.core.exceptions import NotFoundException, ValidationException
 from app.core.permissions import SALES_READ, SALES_WRITE
-from app.models.sales import SalesItem, SalesRecord
-from app.schemas.sales import SalesRecordCreate, SalesRecordOut
+from app.schemas.sales import DailySalesPoint, SalesRecordCreate, SalesRecordOut
 from app.services.sales_service import sales_service
 
 router = APIRouter()
@@ -24,6 +21,7 @@ def list_sales_records(
     customer: Optional[str] = None,
     search: Optional[str] = None,
     min_amount: Optional[float] = None,
+    skip: int = 0,
     limit: int = 500,
     ctx: TenantContext = Depends(get_tenant_ctx),
     _: object = Depends(require_permission(SALES_READ)),
@@ -37,6 +35,7 @@ def list_sales_records(
         customer=customer,
         search=search,
         min_amount=min_amount,
+        skip=skip,
         limit=limit,
     )
 
@@ -67,12 +66,6 @@ def create_sales_record(
         raise ValidationException(str(e)) from e
 
 
-class DailySalesPoint(BaseModel):
-    date: date
-    quantity: int
-    revenue: float
-
-
 @router.get("/analytics/daily", response_model=List[DailySalesPoint])
 def daily_sales_analytics(
     start_date: Optional[date] = None,
@@ -81,26 +74,6 @@ def daily_sales_analytics(
     _: object = Depends(require_permission(SALES_READ)),
     db: Session = Depends(get_db),
 ):
-    stmt = (
-        select(
-            SalesRecord.sale_date.label("date"),
-            func.coalesce(func.sum(SalesItem.quantity), 0).label("quantity"),
-            func.coalesce(func.sum(SalesItem.line_total), 0).label("revenue"),
-        )
-        .join(SalesItem, SalesItem.sales_record_id == SalesRecord.id)
-        .where(SalesRecord.tenant_id == ctx.tenant_id)
-        .where(SalesItem.tenant_id == ctx.tenant_id)
-        .group_by(SalesRecord.sale_date)
-        .order_by(SalesRecord.sale_date.asc())
+    return sales_service.daily_sales_points(
+        db, ctx.tenant_id, start_date=start_date, end_date=end_date
     )
-
-    if start_date is not None:
-        stmt = stmt.where(SalesRecord.sale_date >= start_date)
-    if end_date is not None:
-        stmt = stmt.where(SalesRecord.sale_date <= end_date)
-
-    rows = db.execute(stmt).all()
-    return [
-        DailySalesPoint(date=r.date, quantity=int(r.quantity), revenue=float(r.revenue))
-        for r in rows
-    ]

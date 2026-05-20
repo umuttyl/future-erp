@@ -42,3 +42,9 @@ class SalesRecordOut(SalesRecordBase):
     updated_at: datetime
     items: List[SalesItemOut] = Field(default_factory=list)
 
+
+class DailySalesPoint(BaseModel):
+    date: date
+    quantity: int
+    revenue: float
+
