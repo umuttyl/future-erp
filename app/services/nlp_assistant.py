@@ -305,40 +305,41 @@ def _validate_sql(
     allowed_tables: set[str] | None = None,
     cross_tenant: bool = False,
 ) -> None:
+    from sqlglot import expressions as sgexp
+
     raw = sql.strip()
 
-    if ";" in raw:
-        raise UnsafeSQL("Multiple statements are not allowed.")
-    if re.search(r"(--|/\*)", raw):
-        raise UnsafeSQL("SQL comments are not allowed.")
+    # 1. Inline SQL comments rejected before parsing
+    if any(c in raw for c in ("--", "/*", "*/")) or "\n#" in ("\n" + raw):
+        raise UnsafeSQL("SQL yorum kabul edilmez.")
 
+    # 2. Parse all statements — exactly one expected
     try:
-        expr = sqlglot.parse_one(raw, read=_sqlglot_dialect())
+        statements = sqlglot.parse(raw, read=_sqlglot_dialect())
     except Exception as e:  # pragma: no cover
         raise UnsafeSQL(f"SQL parse failed: {e}") from e
 
-    if expr is None:
-        raise UnsafeSQL("Empty SQL.")
+    if len(statements) != 1 or statements[0] is None:
+        raise UnsafeSQL("Tek bir SELECT bekleniyor.")
+    expr = statements[0]
 
-    if expr.key != "select":
-        raise UnsafeSQL("Only SELECT queries are allowed.")
+    # 3. Must be a SELECT — rejects INSERT/UPDATE/DELETE/DDL at the top level
+    if not isinstance(expr, sgexp.Select):
+        raise UnsafeSQL("Yalnızca SELECT sorgularına izin var.")
 
-    bad_keywords = [
-        "INSERT", "UPDATE", "DELETE", "DROP", "ALTER", "TRUNCATE",
-        "CREATE", "GRANT", "REVOKE", "COPY", "VACUUM", "ATTACH", "DETACH", "PRAGMA",
-    ]
-    up = raw.upper()
-    if any(k in up for k in bad_keywords):
-        raise UnsafeSQL("Non-SELECT keywords are not allowed.")
+    # 4. AST-based DDL/DML check — guards against nested mutation nodes
+    _FORBIDDEN = (sgexp.Insert, sgexp.Update, sgexp.Delete, sgexp.Drop, sgexp.Create, sgexp.Alter)
+    if any(expr.find(node) for node in _FORBIDDEN):
+        raise UnsafeSQL("DDL/DML node'u tespit edildi.")
 
-    # Rol/modüle göre dinamik tablo whitelist kullan; yoksa varsayılan
+    # 5. Table whitelist — AST-based, not string-match (avoids false positives like 'drop_id' column)
     effective_allowed = allowed_tables if allowed_tables is not None else ALLOWED_TABLES
-    tables = {t.name for t in expr.find_all(sqlglot.expressions.Table)}
-    unknown = {t for t in tables if t not in effective_allowed}
+    seen = {t.name for t in expr.find_all(sgexp.Table)}
+    unknown = seen - effective_allowed
     if unknown:
-        raise UnsafeSQL(f"Unknown/forbidden tables: {sorted(unknown)}")
+        raise UnsafeSQL(f"İzin verilmeyen tablolar: {sorted(unknown)}")
 
-    # Admin cross-tenant sorgularında :tid filtresi zorunlu değil
+    # 6. Tenant filter required unless cross-tenant admin query
     if not cross_tenant and ":tid" not in raw.lower():
         raise UnsafeSQL("Sorgu kiracı filtresi (:tid) içermiyor.")
 

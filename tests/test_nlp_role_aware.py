@@ -439,3 +439,89 @@ class TestSchemaDocMetadataDriven:
         from app.services.nlp_assistant import _sqlglot_dialect
         dialect = _sqlglot_dialect()
         assert dialect in ("sqlite", "postgres")
+
+
+# ---------------------------------------------------------------------------
+# P1-3: AST-based SQL validator
+# ---------------------------------------------------------------------------
+
+
+class TestValidateSqlAstBased:
+    def setup_method(self):
+        from app.services.nlp_assistant import UnsafeSQL, _validate_sql
+        self._validate = _validate_sql
+        self._unsafe = UnsafeSQL
+
+    def test_valid_select_passes(self):
+        self._validate(
+            "SELECT id, name FROM products WHERE tenant_id = :tid LIMIT 5",
+            allowed_tables={"products"},
+        )
+
+    def test_column_named_alter_not_false_positive(self):
+        """'alternate_sku' kolon adı keyword-match'te yanlış pozitif üretmemeli."""
+        self._validate(
+            "SELECT id, alternate_sku FROM products WHERE tenant_id = :tid LIMIT 5",
+            allowed_tables={"products"},
+        )
+
+    def test_column_named_drop_not_false_positive(self):
+        """'drop_reason' kolon adı reddedilmemeli."""
+        self._validate(
+            "SELECT id, drop_reason FROM products WHERE tenant_id = :tid",
+            allowed_tables={"products"},
+        )
+
+    def test_rejects_insert(self):
+        with pytest.raises(self._unsafe):
+            self._validate(
+                "INSERT INTO products (sku) VALUES ('X')",
+                allowed_tables={"products"},
+            )
+
+    def test_rejects_update(self):
+        with pytest.raises(self._unsafe):
+            self._validate(
+                "UPDATE products SET name = 'X' WHERE tenant_id = :tid",
+                allowed_tables={"products"},
+            )
+
+    def test_rejects_two_statements(self):
+        with pytest.raises(self._unsafe):
+            self._validate("SELECT 1; SELECT 2", allowed_tables=set())
+
+    def test_rejects_sql_comment_double_dash(self):
+        with pytest.raises(self._unsafe):
+            self._validate(
+                "SELECT id FROM products -- comment\nWHERE tenant_id = :tid",
+                allowed_tables={"products"},
+            )
+
+    def test_rejects_sql_comment_block(self):
+        with pytest.raises(self._unsafe):
+            self._validate(
+                "SELECT id FROM products /* comment */ WHERE tenant_id = :tid",
+                allowed_tables={"products"},
+            )
+
+    def test_rejects_forbidden_table(self):
+        with pytest.raises(self._unsafe):
+            self._validate(
+                "SELECT id FROM users WHERE tenant_id = :tid",
+                allowed_tables={"products"},
+            )
+
+    def test_rejects_missing_tid(self):
+        with pytest.raises(self._unsafe):
+            self._validate(
+                "SELECT id FROM products LIMIT 5",
+                allowed_tables={"products"},
+                cross_tenant=False,
+            )
+
+    def test_cross_tenant_no_tid_required(self):
+        self._validate(
+            "SELECT id FROM products LIMIT 5",
+            allowed_tables={"products"},
+            cross_tenant=True,
+        )
