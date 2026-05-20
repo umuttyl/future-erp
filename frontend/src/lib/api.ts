@@ -11,6 +11,7 @@ import {
 export const api = axios.create({
   baseURL: "/api",
   timeout: 20_000,
+  withCredentials: true,
 });
 
 export type TokenPairOut = {
@@ -28,6 +29,7 @@ export type AuthMe = {
   tenant_name?: string | null;
   full_name?: string | null;
   department?: string | null;
+  onboarding_completed: boolean;
 };
 
 export type SignupOut = TokenPairOut & { tenant_slug: string };
@@ -64,11 +66,10 @@ export async function fetchEmployeePerformance(): Promise<
 let refreshChain: Promise<void> | null = null;
 
 async function refreshAccessToken(): Promise<void> {
-  const rt = getRefreshToken();
-  if (!rt) throw new Error("no_refresh");
+  // refresh token is sent automatically via HttpOnly cookie (withCredentials: true)
   const { data } = await api.post<TokenPairOut>(
     "/auth/refresh",
-    { refresh_token: rt },
+    null,
     { skipAuth: true },
   );
   saveTokens(data.access_token, data.refresh_token);
@@ -268,6 +269,48 @@ export type SalesRecord = {
   items: SalesItem[];
 };
 
+export type Customer = {
+  id: number
+  tenant_id: number
+  name: string
+  email?: string | null
+  phone?: string | null
+  address?: string | null
+  customer_type: 'B2B' | 'B2C'
+  notes?: string | null
+  created_at: string
+}
+
+export type CustomerCreate = {
+  name: string
+  email?: string | null
+  phone?: string | null
+  address?: string | null
+  customer_type: 'B2B' | 'B2C'
+  notes?: string | null
+}
+
+export type Supplier = {
+  id: number
+  tenant_id: number
+  name: string
+  contact_person?: string | null
+  email?: string | null
+  phone?: string | null
+  payment_terms?: string | null
+  notes?: string | null
+  created_at: string
+}
+
+export type SupplierCreate = {
+  name: string
+  contact_person?: string | null
+  email?: string | null
+  phone?: string | null
+  payment_terms?: string | null
+  notes?: string | null
+}
+
 export type FinanceSummary = {
   start_date: string;
   end_date: string;
@@ -345,25 +388,41 @@ export type AiHighlight = {
   metric?: string | null;
 };
 
+export type TenantStat = {
+  id: number;
+  name: string;
+  sector: string;
+  revenue_last_30: number;
+  revenue_growth_pct: number;
+  product_count: number;
+  user_count: number;
+};
+
 export type AiInsights = {
   headline: string;
   highlights: AiHighlight[];
   context: {
     today: string;
-    summary_last_30: FinanceSummary;
+    summary_last_30: FinanceSummary & { total_tenants?: number };
     summary_prev_30: FinanceSummary;
     revenue_growth_pct: number;
     monthly_revenue: MonthlyPoint[];
     top_customers_last_30: TopCustomer[];
     top_products_last_30: TopProduct[];
     low_stock_products: Array<{
-      id: number;
+      id?: number;
       sku: string;
       name: string;
       stock_quantity: number;
       reorder_level: number;
+      tenant_name?: string | null;
     }>;
     total_skus: number;
+    // Admin-only extras
+    total_tenants?: number;
+    total_users?: number;
+    critical_stock_count?: number;
+    top_tenants_by_revenue?: TenantStat[];
   };
 };
 
@@ -375,6 +434,7 @@ export type StockAlert = {
   stock_quantity: number;
   reorder_level: number;
   deficit: number;
+  tenant_name?: string | null;
 };
 
 export function formatDate(value: string | undefined | null): string {
@@ -384,4 +444,100 @@ export function formatDate(value: string | undefined | null): string {
   } catch {
     return value;
   }
+}
+
+// ---------------------------------------------------------------------------
+// Onboarding & Modül Yönetimi
+// ---------------------------------------------------------------------------
+
+export type ModuleInfo = {
+  key: string;
+  label: string;
+  icon: string;
+  description: string;
+  is_active: boolean;
+};
+
+export type SectorInfo = {
+  key: string;
+  label: string;
+  icon: string;
+  description: string;
+  default_modules: string[];
+};
+
+export type OnboardingConfigResponse = {
+  sectors: SectorInfo[];
+  all_modules: ModuleInfo[];
+  current_sector: string | null;
+  current_modules: string[];
+  onboarding_completed: boolean;
+};
+
+export type TenantModulesResponse = {
+  sector: string | null;
+  active_modules: string[];
+  onboarding_completed: boolean;
+};
+
+/** GET /onboarding/config — sektör/modül konfigürasyonunu getirir. */
+export async function fetchOnboardingConfig(): Promise<OnboardingConfigResponse> {
+  const { data } = await api.get<OnboardingConfigResponse>("/onboarding/config");
+  return data;
+}
+
+/** POST /onboarding/setup — sektör + modül seçimini kaydeder. */
+export async function postOnboardingSetup(body: {
+  sector: string;
+  active_modules: string[];
+}): Promise<TenantModulesResponse> {
+  const { data } = await api.post<TenantModulesResponse>("/onboarding/setup", body);
+  return data;
+}
+
+/** GET /onboarding/modules — mevcut aktif modülleri getirir (sidebar için). */
+export async function fetchActiveModules(): Promise<TenantModulesResponse> {
+  const { data } = await api.get<TenantModulesResponse>("/onboarding/modules");
+  return data;
+}
+
+/** PATCH /onboarding/modules — modülleri günceller (ayarlar sayfası). */
+export async function patchActiveModules(body: {
+  active_modules: string[];
+}): Promise<TenantModulesResponse> {
+  const { data } = await api.patch<TenantModulesResponse>("/onboarding/modules", body);
+  return data;
+}
+
+// ---------------------------------------------------------------------------
+// Anomali Tespiti
+// ---------------------------------------------------------------------------
+
+export type AnomalyResultOut = {
+  source: string;
+  severity: "critical" | "warning" | "info";
+  title: string;
+  message: string;
+  score: number;
+  entity_id?: number | null;
+  entity_label?: string | null;
+  extra?: Record<string, unknown>;
+};
+
+export type AnomalyRunResponse = {
+  tenant_id: number;
+  total: number;
+  anomalies: AnomalyResultOut[];
+};
+
+/** GET /anomaly/run — anomali tespitini çalıştırır + WS üzerinden yayınlar. */
+export async function runAnomalyDetection(): Promise<AnomalyRunResponse> {
+  const { data } = await api.get<AnomalyRunResponse>("/anomaly/run");
+  return data;
+}
+
+/** GET /anomaly/latest — son tespit sonuçlarını getirir. */
+export async function fetchLatestAnomalies(): Promise<AnomalyRunResponse> {
+  const { data } = await api.get<AnomalyRunResponse>("/anomaly/latest");
+  return data;
 }
