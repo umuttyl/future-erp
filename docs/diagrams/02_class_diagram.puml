@@ -1,0 +1,592 @@
+@startuml Future_ERP_Class_Diagram
+' ============================================================
+'  Future ERP - Class Diagram (v2 - 31.05.2026)
+'  Tezde Figure 5.2 yerine kullanilacak diyagram.
+'  - 26 persisted class + 8 transient AI DTO
+'  - 8 logical package + 1 yan transient DTO blok
+'  - Kare/dik format (PNG export icin)
+'  - 4-katmanli RBAC: derived role labels = Admin | Manager | Employee
+'  - Kapsam disi (POS/WHOLESALE/RECIPE/PROJECTS/TIME) HARIC.
+' ============================================================
+
+skinparam dpi 120
+skinparam shadowing false
+skinparam roundcorner 6
+skinparam ranksep 40
+skinparam nodesep 22
+skinparam linetype polyline
+
+skinparam class {
+    BackgroundColor #FAFAFA
+    BorderColor #444444
+    ArrowColor #1565C0
+    FontSize 11
+    FontName "Times New Roman"
+    AttributeFontSize 10
+    AttributeFontName "Times New Roman"
+}
+skinparam package {
+    FontStyle bold
+    FontSize 12
+    FontName "Times New Roman"
+    BorderColor #555555
+    BackgroundColor transparent
+}
+skinparam note {
+    BackgroundColor #FFFDE7
+    BorderColor #BDB76B
+    FontSize 9
+    FontName "Times New Roman"
+}
+skinparam arrow {
+    Color #1565C0
+    FontColor #555555
+    FontSize 9
+}
+
+title <b>Future ERP - Class Diagram</b>\n<i>26 persisted entities organised into eight logical packages</i>
+
+' ============================================================
+'  PAKET 1 : Tenant & Auth (4-katmanli RBAC)
+' ============================================================
+
+package "1. Tenant & Auth" #FFF3E0 {
+
+    class Tenant {
+        +id : int <<PK>>
+        +name : str
+        +slug : str <<unique>>
+        +sector : str?
+        +active_modules : List[str] <<JSON>>
+        +onboarding_completed : bool
+        +currency : str (ISO 4217)
+        +language : str (ISO 639-1)
+        +address : str?
+        +phone : str?
+        +tax_number : str?
+        +bank_info : str?
+        +logo_url : str?
+        +is_active : bool
+        +created_at : datetime
+    }
+
+    class User {
+        +id : int <<PK>>
+        +tenant_id : int? <<FK>>
+        +email : str
+        +password_hash : str (Argon2)
+        +full_name : str?
+        +department : str?
+        +is_platform_admin : bool
+        +role_kind : str (owner | staff)
+        +job_role_id : int? <<FK>>
+        +is_active : bool
+        +created_at : datetime
+        --
+        +role : str <<derived>>
+         (Admin | Manager | Employee)
+    }
+
+    class RefreshToken {
+        +id : int <<PK>>
+        +user_id : int <<FK>>
+        +token_hash : str
+        +expires_at : datetime
+        +revoked_at : datetime?
+        +used_at : datetime? <<replay guard>>
+        +created_at : datetime
+    }
+
+    class JobRoleTemplate {
+        +id : int <<PK>>
+        +tenant_id : int <<FK>>
+        +name : str
+        +permissions : List[str] <<JSON>>
+        +is_system : bool
+        +created_at : datetime
+    }
+}
+
+' ============================================================
+'  PAKET 2 : Catalog & Inventory
+' ============================================================
+
+package "2. Catalog & Inventory" #E8F5E9 {
+
+    class Product {
+        +id : int <<PK>>
+        +tenant_id : int <<FK>>
+        +name : str
+        +category : str
+        +unit_price : Decimal
+        +cost_price : Decimal
+        +stock_quantity : int
+        +reorder_level : int
+        +deleted_at : datetime? <<soft delete>>
+    }
+
+    class StockMovement {
+        +id : int <<PK>>
+        +tenant_id : int <<FK>>
+        +product_id : int <<FK>>
+        +movement_type : str (in | out | adjust)
+        +change : int
+        +balance_after : int
+        +note : str?
+        +created_at : datetime
+    }
+
+    class SupplyOrder {
+        +id : int <<PK>>
+        +tenant_id : int <<FK>>
+        +product_id : int <<FK>>
+        +supplier_id : int? <<FK>>
+        +quantity : int
+        +unit_cost : Decimal
+        +status : str (Draft | Confirmed)
+        +is_ai_override : bool
+        +created_at : datetime
+    }
+
+    class StockCount {
+        +id : int <<PK>>
+        +tenant_id : int <<FK>>
+        +count_date : date
+        +status : str (open | closed)
+        +note : str?
+        +created_at : datetime
+    }
+
+    class StockCountItem {
+        +id : int <<PK>>
+        +tenant_id : int <<FK>>
+        +stock_count_id : int <<FK>>
+        +product_id : int <<FK>>
+        +expected_qty : int
+        +counted_qty : int
+        +variance : int
+    }
+}
+
+' ============================================================
+'  PAKET 3 : Sales & Orders Pipeline (Retail + B2B)
+' ============================================================
+
+package "3. Sales & Orders Pipeline" #FFF9C4 {
+
+    class SalesRecord {
+        +id : int <<PK>>
+        +tenant_id : int <<FK>>
+        +record_no : str <<unique per tenant>>
+        +sale_date : date
+        +customer_id : int? <<FK>>
+        +created_by_user_id : int? <<FK>>
+        +payment_type : str
+        +total_amount : Decimal
+        +tax_total : Decimal
+        +deleted_at : datetime?
+    }
+
+    class SalesItem {
+        +id : int <<PK>>
+        +tenant_id : int <<FK>>
+        +sales_record_id : int <<FK>>
+        +product_id : int <<FK>>
+        +quantity : int
+        +unit_price : Decimal
+        +tax_rate : Decimal
+        +tax_amount : Decimal
+        +cost_price : Decimal <<snapshot>>
+        +line_total : Decimal
+    }
+
+    class CustomerOrder {
+        +id : int <<PK>>
+        +tenant_id : int <<FK>>
+        +order_no : str
+        +order_date : date
+        +customer_id : int? <<FK>>
+        +status : str (draft | confirmed |\nshipped | invoiced | cancelled)
+        +total_amount : Decimal
+        +tax_total : Decimal
+        +created_by_user_id : int? <<FK>>
+    }
+
+    class CustomerOrderItem {
+        +id : int <<PK>>
+        +tenant_id : int <<FK>>
+        +order_id : int <<FK>>
+        +product_id : int <<FK>>
+        +quantity : int
+        +unit_price : Decimal
+        +tax_rate : Decimal
+        +line_total : Decimal
+        +tax_amount : Decimal
+    }
+
+    class DeliveryNote {
+        +id : int <<PK>>
+        +tenant_id : int <<FK>>
+        +order_id : int <<FK>>
+        +note_no : str
+        +ship_date : date
+        +status : str
+    }
+
+    class DeliveryNoteItem {
+        +id : int <<PK>>
+        +tenant_id : int <<FK>>
+        +delivery_note_id : int <<FK>>
+        +product_id : int <<FK>>
+        +quantity : int
+    }
+
+    class Invoice {
+        +id : int <<PK>>
+        +tenant_id : int <<FK>>
+        +order_id : int <<FK>>
+        +delivery_note_id : int? <<FK>>
+        +invoice_no : str
+        +invoice_date : date
+        +customer_id : int? <<FK>>
+        +total_amount : Decimal
+        +tax_total : Decimal
+        +status : str (draft | sent |\npaid | cancelled)
+    }
+}
+
+' ============================================================
+'  PAKET 4 : CRM
+' ============================================================
+
+package "4. CRM" #FCE4EC {
+
+    class Customer {
+        +id : int <<PK>>
+        +tenant_id : int <<FK>>
+        +name : str
+        +email : str?
+        +phone : str?
+        +segment : str (B2B | B2C)
+        +tax_number : str?
+        +deleted_at : datetime?
+    }
+
+    class Supplier {
+        +id : int <<PK>>
+        +tenant_id : int <<FK>>
+        +name : str
+        +email : str?
+        +phone : str?
+        +deleted_at : datetime?
+    }
+}
+
+' ============================================================
+'  PAKET 5 : Finance, Cashbook & Accounts
+' ============================================================
+
+package "5. Finance, Cashbook & Accounts" #FFE0B2 {
+
+    class CashAccount {
+        +id : int <<PK>>
+        +tenant_id : int <<FK>>
+        +name : str
+        +account_type : str (cash | bank)
+        +currency : str
+        +balance : Decimal
+        +is_active : bool
+    }
+
+    class CashTransaction {
+        +id : int <<PK>>
+        +tenant_id : int <<FK>>
+        +account_id : int <<FK>>
+        +transaction_type : str (income |\nexpense | transfer_in | transfer_out)
+        +amount : Decimal
+        +balance_after : Decimal
+        +description : str?
+        +sales_record_id : int? <<FK>>
+        +transaction_date : date
+    }
+
+    class AccountMovement {
+        +id : int <<PK>>
+        +tenant_id : int <<FK>>
+        +customer_id : int? <<FK>>
+        +supplier_id : int? <<FK>>
+        +movement_type : str (debit | credit)
+        +amount : Decimal
+        +balance_after : Decimal
+        +reference : str?
+        +movement_date : date
+    }
+}
+
+' ============================================================
+'  PAKET 6 : Team & Tasks
+' ============================================================
+
+package "6. Team & Tasks" #E0F7FA {
+
+    class TeamTask {
+        +id : int <<PK>>
+        +tenant_id : int <<FK>>
+        +title : str
+        +description : str?
+        +assigned_to_user_id : int? <<FK>>
+        +status : str (open | in_progress |\ndone | cancelled)
+        +due_date : date?
+        +created_by_user_id : int? <<FK>>
+        +created_at : datetime
+    }
+}
+
+' ============================================================
+'  PAKET 7 : Collaboration & Audit
+' ============================================================
+
+package "7. Collaboration & Audit" #EDE7F6 {
+
+    class RecordComment {
+        +id : int <<PK>>
+        +tenant_id : int <<FK>>
+        +record_type : str
+        +record_id : int
+        +author_user_id : int <<FK>>
+        +body : str
+        +created_at : datetime
+    }
+
+    class RecordTag {
+        +id : int <<PK>>
+        +tenant_id : int <<FK>>
+        +record_type : str
+        +record_id : int
+        +tag : str
+    }
+
+    class AuditLog {
+        +id : int <<PK>>
+        +actor_tenant_id : int? <<FK>>
+        +actor_user_id : int <<FK>>
+        +action : str
+        +target_tenant_id : int? <<FK>>
+        +target_entity_type : str?
+        +target_entity_id : int?
+        +payload : dict <<JSON>>
+        +created_at : datetime
+    }
+}
+
+' ============================================================
+'  PAKET 8 : AI Persistence
+' ============================================================
+
+package "8. AI Persistence" #F3E5F5 {
+
+    class SalesForecastResult {
+        +id : int <<PK>>
+        +tenant_id : int <<FK>>
+        +product_id : int? <<FK>>
+        +horizon_days : int
+        +result_payload : dict <<JSON>>
+        +confidence : float
+        +created_at : datetime
+    }
+}
+
+' ============================================================
+'  YAN BLOK : Transient AI DTOs (service layer, persist edilmez)
+' ============================================================
+
+package "Transient AI DTOs\n(service layer, not persisted)" #ECEFF1 {
+
+    class AnomalyResult <<DTO>> {
+        +source : str (finance | sales | inventory)
+        +severity : str (critical | warning | info)
+        +title : str
+        +message : str
+        +score : float
+        +entity_id : int?
+        +extra : dict
+    }
+
+    class NlpAnswer <<DTO>> {
+        +sql : str
+        +data : List[dict]
+        +columns : List[str]
+        +answer : str
+        +chart_hint : dict
+    }
+
+    class ExpertAnswer <<DTO>> {
+        +expert_key : str
+        +nlp_answer : NlpAnswer
+    }
+
+    class MorningBriefingItem <<DTO>> {
+        +title : str
+        +body : str
+        +priority : str
+        +icon : str
+        +action_label : str?
+        +action_url : str?
+    }
+
+    class CustomerHealthScore <<DTO>> {
+        +customer_id : int
+        +score : int (0..100)
+        +risk_level : str
+        +factors : List[str]
+    }
+
+    class CashflowSimulation <<DTO>> {
+        +horizon_days : int (14)
+        +daily_projection : List[dict]
+        +alert : str?
+    }
+
+    class CustomerSignals <<DTO>> {
+        +customer_id : int
+        +signals : List[str] (vip |\nsilent_30 | payment_pending)
+    }
+
+    class ProductSignals <<DTO>> {
+        +product_id : int
+        +signals : List[str] (critical |\ndeclining | fast_mover)
+    }
+}
+
+' ============================================================
+'  ILISKILER
+' ============================================================
+
+' --- Tenant root (composition) ---
+Tenant "1" *-- "0..*" User                : owns
+Tenant "1" *-- "0..*" JobRoleTemplate     : owns
+Tenant "1" *-- "0..*" Product             : owns
+Tenant "1" *-- "0..*" Customer            : owns
+Tenant "1" *-- "0..*" Supplier            : owns
+Tenant "1" *-- "0..*" SalesRecord         : owns
+Tenant "1" *-- "0..*" CustomerOrder       : owns
+Tenant "1" *-- "0..*" CashAccount         : owns
+Tenant "1" *-- "0..*" AccountMovement     : owns
+Tenant "1" *-- "0..*" TeamTask            : owns
+Tenant "1" *-- "0..*" StockCount          : owns
+Tenant "1" *-- "0..*" SupplyOrder         : owns
+Tenant "1" *-- "0..*" SalesForecastResult : owns
+
+' --- Auth ---
+User "1" *-- "0..*" RefreshToken : has
+User "0..*" --> "0..1" JobRoleTemplate : assigned
+
+' --- Catalog & Inventory ---
+Product "1" o-- "0..*" StockMovement
+Product "1" --> "0..*" SupplyOrder
+StockCount "1" *-- "1..*" StockCountItem
+StockCountItem "*" --> "1" Product
+
+' --- Sales (header/detail) ---
+SalesRecord "1" *-- "1..*" SalesItem
+SalesItem "*" --> "1" Product
+SalesRecord "*" --> "0..1" Customer
+SalesRecord "*" --> "0..1" User : created_by
+
+' --- B2B Order pipeline ---
+CustomerOrder "1" *-- "1..*" CustomerOrderItem
+CustomerOrderItem "*" --> "1" Product
+CustomerOrder "*" --> "0..1" Customer
+CustomerOrder "1" o-- "0..*" DeliveryNote
+DeliveryNote "1" *-- "1..*" DeliveryNoteItem
+DeliveryNoteItem "*" --> "1" Product
+CustomerOrder "1" o-- "0..*" Invoice
+Invoice "*" --> "0..1" DeliveryNote
+Invoice "*" --> "0..1" Customer
+
+' --- Cashbook & Accounts ---
+CashAccount "1" *-- "0..*" CashTransaction
+CashTransaction "*" --> "0..1" SalesRecord : link
+AccountMovement "*" --> "0..1" Customer
+AccountMovement "*" --> "0..1" Supplier
+
+' --- Team ---
+TeamTask "*" --> "0..1" User : assigned_to
+
+' --- Collaboration & Audit ---
+RecordComment "*" --> "1" User : author
+AuditLog "*" --> "1" User : actor
+AuditLog "*" --> "0..1" Tenant : target
+
+' --- AI Persistence ---
+SalesForecastResult "*" --> "0..1" Product
+
+' --- AI DTO (dependency) ---
+ExpertAnswer ..> NlpAnswer : wraps
+
+' ============================================================
+'  NOTLAR
+' ============================================================
+
+note top of Tenant
+  <b>Multi-tenant root</b>
+  Tum domain tablolari tenant_id
+  FK ile bu sinifa baglidir
+  (ON DELETE CASCADE).
+end note
+
+note right of User
+  <b>4-katmanli RBAC - kullanici etiketleri</b>
+  is_platform_admin = True -> Admin
+  role_kind = 'owner'      -> Manager
+  role_kind = 'staff'      -> Employee
+   (job_role_id -> JobRoleTemplate
+    permissions JSON)
+
+  role : derived label (Admin |
+   Manager | Employee); DB'de
+   saklanmaz, derive_role_label()
+   ile turetilir.
+end note
+
+note right of JobRoleTemplate
+  <b>Tenant-scoped role template</b>
+  permissions: ["sales.write",
+                "customers.read", ...]
+  Her Manager kendi sirketi icin
+  ozel Employee rolleri tanimlar
+  (or. Kasiyer, Depocu, Muhasebe).
+  is_system=True olan sistem rolleri
+  silinemez (seed at tenant creation).
+end note
+
+note bottom of CustomerOrder
+  <b>State machine</b>
+  draft -> confirmed -> shipped
+        -> invoiced -> (paid | cancelled)
+  Her gecis AuditLog'a yazilir.
+end note
+
+note bottom of SalesForecastResult
+  <b>Tek persisted AI artefakti</b>
+  result_payload Prophet ciktisi
+  (yhat / yhat_lower / yhat_upper)
+  JSON olarak saklanir; modelleme
+  degisikliklerine dayanikli.
+end note
+
+note right of AnomalyResult
+  <b>Transient DTOs</b>
+  DB'ye yazilmaz; service
+  katmaninda olusturulur,
+  response'tan sonra atilir.
+  - AnomalyResult (IsolationForest)
+  - NlpAnswer (NLP query)
+  - ExpertAnswer (5 expert AI)
+  - MorningBriefingItem (cards)
+  - CustomerHealthScore
+  - CashflowSimulation
+  - Customer / ProductSignals
+end note
+
+@enduml

@@ -1,0 +1,260 @@
+from __future__ import annotations
+
+from datetime import date, datetime, timezone
+from decimal import Decimal
+from typing import List, Optional
+
+from sqlalchemy import func, select
+from sqlalchemy.orm import Session, selectinload
+
+from app.models.account_movement import AccountMovement
+from app.models.audit_log import AuditLog
+from app.models.cashbook import CashAccount, CashTransaction
+from app.models.customer import Customer
+from app.models.product import Product
+from app.models.sales import SalesItem, SalesRecord
+from app.models.stock_movement import StockMovement
+from app.schemas.sales import DailySalesPoint, SalesRecordCreate
+from app.services._base import TenantScopedService
+
+
+class SalesService(TenantScopedService[SalesRecord]):
+    model = SalesRecord
+    def list_records(
+        self,
+        db: Session,
+        tenant_id: int,
+        *,
+        start_date: Optional[date] = None,
+        end_date: Optional[date] = None,
+        customer: Optional[str] = None,
+        search: Optional[str] = None,
+        min_amount: Optional[float] = None,
+        skip: int = 0,
+        limit: int = 500,
+    ) -> List[SalesRecord]:
+        stmt = (
+            select(SalesRecord)
+            .options(selectinload(SalesRecord.items))
+            .where(SalesRecord.tenant_id == tenant_id, SalesRecord.deleted_at.is_(None))
+            .order_by(SalesRecord.sale_date.desc(), SalesRecord.id.desc())
+            .offset(skip)
+            .limit(limit)
+        )
+        if start_date is not None:
+            stmt = stmt.where(SalesRecord.sale_date >= start_date)
+        if end_date is not None:
+            stmt = stmt.where(SalesRecord.sale_date <= end_date)
+        if customer:
+            stmt = stmt.where(SalesRecord.customer_name.ilike(f"%{customer}%"))
+        if search:
+            like = f"%{search}%"
+            stmt = stmt.where(
+                (SalesRecord.record_no.ilike(like))
+                | (SalesRecord.customer_name.ilike(like))
+            )
+        if min_amount is not None:
+            stmt = stmt.where(SalesRecord.total_amount >= Decimal(str(min_amount)))
+        return list(db.scalars(stmt).all())
+
+    def get_record(self, db: Session, tenant_id: int, record_id: int) -> Optional[SalesRecord]:
+        stmt = (
+            select(SalesRecord)
+            .options(selectinload(SalesRecord.items))
+            .where(
+                SalesRecord.id == record_id,
+                SalesRecord.tenant_id == tenant_id,
+                SalesRecord.deleted_at.is_(None),
+            )
+        )
+        return db.scalar(stmt)
+
+    def delete_record(self, db: Session, tenant_id: int, record_id: int) -> None:
+        record = self.get_record(db, tenant_id, record_id)
+        if not record:
+            raise ValueError("Satış kaydı bulunamadı.")
+        record.deleted_at = datetime.now(timezone.utc)
+        db.add(record)
+        db.commit()
+
+    def daily_sales_points(
+        self,
+        db: Session,
+        tenant_id: int,
+        *,
+        start_date: Optional[date] = None,
+        end_date: Optional[date] = None,
+    ) -> List[DailySalesPoint]:
+        stmt = (
+            select(
+                SalesRecord.sale_date.label("date"),
+                func.coalesce(func.sum(SalesItem.quantity), 0).label("quantity"),
+                func.coalesce(func.sum(SalesItem.line_total), 0).label("revenue"),
+            )
+            .join(SalesItem, SalesItem.sales_record_id == SalesRecord.id)
+            .where(SalesRecord.tenant_id == tenant_id)
+            .where(SalesItem.tenant_id == tenant_id)
+            .group_by(SalesRecord.sale_date)
+            .order_by(SalesRecord.sale_date.asc())
+        )
+        if start_date is not None:
+            stmt = stmt.where(SalesRecord.sale_date >= start_date)
+        if end_date is not None:
+            stmt = stmt.where(SalesRecord.sale_date <= end_date)
+        rows = db.execute(stmt).all()
+        return [
+            DailySalesPoint(date=r.date, quantity=int(r.quantity), revenue=float(r.revenue))
+            for r in rows
+        ]
+
+    def create_record(
+        self,
+        db: Session,
+        tenant_id: int,
+        data: SalesRecordCreate,
+        *,
+        created_by_user_id: Optional[int] = None,
+    ) -> SalesRecord:
+        # customer_id verilmişse CRM'den adı otomatik doldur
+        resolved_name = data.customer_name
+        if data.customer_id is not None:
+            cust = db.scalar(
+                select(Customer).where(
+                    Customer.id == data.customer_id,
+                    Customer.tenant_id == tenant_id,
+                    Customer.deleted_at.is_(None),
+                )
+            )
+            if cust:
+                resolved_name = cust.name
+
+        record = SalesRecord(
+            tenant_id=tenant_id,
+            record_no=data.record_no,
+            sale_date=data.sale_date,
+            customer_id=data.customer_id if data.customer_id else None,
+            customer_name=resolved_name,
+            total_amount=Decimal("0"),
+            created_by_user_id=created_by_user_id,
+        )
+
+        total = Decimal("0")
+        items: List[SalesItem] = []
+        touched_products: list[Product] = []
+
+        for i in data.items:
+            p_stmt = select(Product).where(Product.id == i.product_id, Product.tenant_id == tenant_id)
+            product = db.scalar(p_stmt)
+            if not product:
+                raise ValueError(f"Product not found: {i.product_id}")
+            if (product.stock_quantity or 0) < i.quantity:
+                raise ValueError(
+                    f"Yetersiz stok: {product.name} (mevcut {product.stock_quantity}, istenen {i.quantity})"
+                )
+
+            line_total = (Decimal(i.quantity) * i.unit_price).quantize(Decimal("0.01"))
+            # KDV oranı: isteğe bağlı override yoksa ürünün varsayılanı kullanılır
+            tax_rate = (i.tax_rate if i.tax_rate is not None else product.tax_rate).quantize(Decimal("0.01"))
+            # KDV dahil fiyattan KDV miktarı geri hesaplama: tax = gross * rate / (100 + rate)
+            tax_amount = (line_total * tax_rate / (100 + tax_rate)).quantize(Decimal("0.01"))
+            total += line_total
+            items.append(
+                SalesItem(
+                    tenant_id=tenant_id,
+                    product_id=i.product_id,
+                    quantity=i.quantity,
+                    unit_price=i.unit_price,
+                    line_total=line_total,
+                    tax_rate=tax_rate,
+                    tax_amount=tax_amount,
+                    cost_price_snapshot=(product.cost_price or Decimal("0")).quantize(Decimal("0.01")),
+                )
+            )
+
+            product.stock_quantity = product.stock_quantity - i.quantity
+            touched_products.append(product)
+
+        record.total_amount = total
+        record.payment_type = data.payment_type
+        record.items = items
+
+        db.add(record)
+        for p in touched_products:
+            db.add(p)
+        db.flush()  # record.id atanır, henüz commit edilmez
+
+        # --- Otomatik muhasebe kayıtları ---
+        payment = data.payment_type
+        if payment == "kredi":
+            # Kredili satış → müşteri cari hesabına borç
+            if data.customer_id:
+                db.add(AccountMovement(
+                    tenant_id=tenant_id,
+                    customer_id=data.customer_id,
+                    movement_type="debit",
+                    amount=total,
+                    description=f"Satış – {record.record_no}",
+                    reference=record.record_no,
+                    sales_record_id=record.id,
+                    movement_date=record.sale_date,
+                ))
+        else:
+            # Nakit veya banka havalesi → kasa/banka hesabına gelir
+            # Önce istenen türü ara; yoksa ilk aktif hesabı kullan
+            acc_type = "bank" if payment == "banka_havalesi" else "cash"
+            cash_acc = db.scalar(
+                select(CashAccount).where(
+                    CashAccount.tenant_id == tenant_id,
+                    CashAccount.account_type == acc_type,
+                    CashAccount.is_active.is_(True),
+                ).limit(1)
+            )
+            if cash_acc is None:
+                cash_acc = db.scalar(
+                    select(CashAccount).where(
+                        CashAccount.tenant_id == tenant_id,
+                        CashAccount.is_active.is_(True),
+                    ).order_by(CashAccount.id.asc()).limit(1)
+                )
+            if cash_acc:
+                cash_acc.balance += total
+                db.add(CashTransaction(
+                    tenant_id=tenant_id,
+                    account_id=cash_acc.id,
+                    transaction_type="income",
+                    amount=total,
+                    balance_after=cash_acc.balance,
+                    description=f"Satış – {record.record_no}",
+                    reference=record.record_no,
+                    sales_record_id=record.id,
+                    transaction_date=record.sale_date,
+                ))
+
+        for it, p in zip(items, touched_products):
+            db.add(
+                StockMovement(
+                    tenant_id=tenant_id,
+                    product_id=p.id,
+                    movement_type="out",
+                    change=-int(it.quantity),
+                    balance_after=p.stock_quantity,
+                    reference=record.record_no,
+                    note=f"Satış {record.record_no}",
+                )
+            )
+        if created_by_user_id:
+            db.add(AuditLog(
+                actor_tenant_id=tenant_id,
+                actor_user_id=created_by_user_id,
+                action="sales.create",
+                target_entity_type="sales_record",
+                target_entity_id=record.id,
+                payload={"record_no": record.record_no, "total": float(record.total_amount)},
+            ))
+        db.commit()  # tek atomik commit
+        db.refresh(record)
+
+        return self.get_record(db, tenant_id, record.id) or record
+
+
+sales_service = SalesService()
