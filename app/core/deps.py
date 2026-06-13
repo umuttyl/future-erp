@@ -44,27 +44,26 @@ def get_current_principal(
     cred: Annotated[Optional[HTTPAuthorizationCredentials], Depends(security)],
 ) -> AuthPrincipal:
     if cred is None or not cred.credentials:
-        raise UnauthorizedException("Oturum gerekli.", code="UNAUTHORIZED")
+        raise UnauthorizedException("Sign-in required.", code="UNAUTHORIZED")
     token = cred.credentials.strip()
     try:
         payload = decode_access_token(token)
     except jwt.PyJWTError:
-        raise UnauthorizedException("Geçersiz veya süresi dolmuş oturum.", code="INVALID_TOKEN") from None
+        raise UnauthorizedException("Invalid or expired session.", code="INVALID_TOKEN") from None
     if payload.get("typ") != "access":
-        raise UnauthorizedException("Geçersiz token türü.", code="INVALID_TOKEN")
+        raise UnauthorizedException("Invalid token type.", code="INVALID_TOKEN")
     try:
         uid = int(payload["sub"])
         tid = int(payload.get("tid") or 0)
     except (KeyError, TypeError, ValueError):
-        raise UnauthorizedException("Geçersiz token içeriği.", code="INVALID_TOKEN") from None
+        raise UnauthorizedException("Invalid token payload.", code="INVALID_TOKEN") from None
     is_platform_admin = bool(payload.get("is_platform_admin", False))
     role_kind = str(payload.get("role_kind") or "")
     email = str(payload.get("email") or "")
-    # tid=0 sadece platform admin için geçerlidir
     if tid == 0 and not is_platform_admin:
-        raise UnauthorizedException("Geçersiz token içeriği.", code="INVALID_TOKEN")
+        raise UnauthorizedException("Invalid token payload.", code="INVALID_TOKEN")
     if not is_platform_admin and role_kind not in ("owner", "staff"):
-        raise UnauthorizedException("Geçersiz rol.", code="INVALID_TOKEN")
+        raise UnauthorizedException("Invalid role.", code="INVALID_TOKEN")
     return AuthPrincipal(
         user_id=uid,
         tenant_id=tid,
@@ -102,30 +101,57 @@ def get_tenant(
             except (ValueError, TypeError):
                 pass
         else:
-            # Admin impersonation olmadan tenant endpoint'e erişemez
             from fastapi import HTTPException as _HTTPException
             raise _HTTPException(
                 status_code=403,
-                detail="Platform yöneticisi bir şirketi taklit etmeden şirkete ait endpoint'lere erişemez.",
+                detail="Platform administrator must impersonate a company before accessing company endpoints.",
             )
 
-    # tenant_id hâlâ 0 ise (geçersiz/eksik impersonation header) → 403 (401 değil)
     if tenant_id == 0:
         from fastapi import HTTPException as _HTTPException
         raise _HTTPException(
             status_code=403,
-            detail="Geçersiz şirket kimliği. Platform yöneticisi geçerli bir X-Impersonate-Tenant-Id göndermeli.",
+            detail="Invalid company ID. Platform administrator must send a valid X-Impersonate-Tenant-Id header.",
         )
 
     tenant = db.get(TenantModel, tenant_id)
     if tenant is None or not tenant.is_active:
-        raise UnauthorizedException("Kiracı bulunamadı veya devre dışı.", code="TENANT_INACTIVE")
+        raise UnauthorizedException("Company not found or inactive.", code="TENANT_INACTIVE")
     return tenant
 
 
 def get_tenant_ctx(
     tenant: Annotated["Tenant", Depends(get_tenant)],
 ) -> TenantContext:
+    return TenantContext(tenant_id=tenant.id)
+
+
+def get_tenant_ctx_or_admin(
+    request: Request,
+    principal: Annotated[AuthPrincipal, Depends(get_current_principal)],
+    db: Session = Depends(get_db),
+) -> TenantContext:
+    """Like get_tenant_ctx but allows platform admin without impersonation.
+
+    Admin without X-Impersonate-Tenant-Id header gets tenant_id=0 (cross-tenant mode).
+    Used by AI/NLP endpoints that handle admin queries platform-wide.
+    """
+    from app.models.tenant import Tenant as TenantModel
+
+    if principal.is_platform_admin:
+        hdr = request.headers.get("X-Impersonate-Tenant-Id")
+        if hdr:
+            try:
+                tid_int = int(hdr)
+                if tid_int > 0:
+                    return TenantContext(tenant_id=tid_int)
+            except (ValueError, TypeError):
+                pass
+        return TenantContext(tenant_id=0)
+
+    tenant = db.get(TenantModel, principal.tenant_id)
+    if tenant is None or not tenant.is_active:
+        raise UnauthorizedException("Company not found or inactive.", code="TENANT_INACTIVE")
     return TenantContext(tenant_id=tenant.id)
 
 
@@ -148,7 +174,7 @@ def require_permission(permission: str) -> Callable[..., AuthPrincipal]:
             .options(joinedload(User.job_role))
         )
         if user is None or not user.is_active:
-            raise UnauthorizedException("Hesap bulunamadı veya devre dışı.", code="UNAUTHORIZED")
+            raise UnauthorizedException("Account not found or inactive.", code="UNAUTHORIZED")
         if permission not in user_permissions(user):
             raise PermissionException(code="PERMISSION_DENIED")
         return principal
@@ -160,12 +186,19 @@ def require_module(module_key: str) -> Callable[..., AuthPrincipal]:
     """Dependency factory: İstenen modülün tenant için aktif olduğunu doğrular."""
     def _check(
         principal: AuthPrincipal = Depends(get_current_principal),
-        tenant: "Tenant" = Depends(get_tenant),
+        db: Session = Depends(get_db),
     ) -> AuthPrincipal:
+        # Platform admin bypasses module checks — always has access to all modules
+        if principal.is_platform_admin:
+            return principal
+        from app.models.tenant import Tenant as TenantModel
+        tenant = db.get(TenantModel, principal.tenant_id)
+        if tenant is None or not tenant.is_active:
+            raise UnauthorizedException("Company not found or inactive.", code="TENANT_INACTIVE")
         if not is_module_active(tenant.active_modules, module_key):
             raise HTTPException(
                 status_code=403,
-                detail=f"'{module_key}' modülü şirketiniz için etkin değil.",
+                detail=f"Module '{module_key}' is not active for your company.",
             )
         return principal
 

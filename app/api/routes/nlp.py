@@ -6,7 +6,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from app.core.db import get_db
-from app.core.deps import AuthPrincipal, TenantContext, get_current_principal, get_tenant_ctx, require_permission
+from app.core.deps import AuthPrincipal, TenantContext, get_current_principal, get_tenant_ctx_or_admin, require_permission
 from app.core.permissions import NLP_QUERY_EXECUTE
 from app.core.rate_limit import limiter
 from app.models.tenant import Tenant
@@ -141,7 +141,7 @@ def _nlp_query_handler(
 def nlp_query(
     request: Request,
     payload: NLQueryRequest,
-    ctx: TenantContext = Depends(get_tenant_ctx),
+    ctx: TenantContext = Depends(get_tenant_ctx_or_admin),
     principal: AuthPrincipal = Depends(require_permission(NLP_QUERY_EXECUTE)),
     db: Session = Depends(get_db),
 ):
@@ -154,7 +154,7 @@ def nlp_query(
 def nlp_chat(
     request: Request,
     payload: NLQueryRequest,
-    ctx: TenantContext = Depends(get_tenant_ctx),
+    ctx: TenantContext = Depends(get_tenant_ctx_or_admin),
     principal: AuthPrincipal = Depends(require_permission(NLP_QUERY_EXECUTE)),
     db: Session = Depends(get_db),
 ):

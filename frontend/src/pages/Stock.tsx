@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { CheckCircle, Download, Loader2, Sparkles, Upload, X } from 'lucide-react'
-import { useSearchParams } from 'react-router-dom'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 
 import { ProductAiBadges } from '../components/ui/AiBadge'
 import { AppToast } from '../components/ui/AppToast'
@@ -90,6 +90,7 @@ export function StockPage() {
   const { hasPermission } = useAuth()
   const canAutoDraft = hasPermission(PERM_STOCK_ADJUST)
   const [searchParams] = useSearchParams()
+  const navigate = useNavigate()
 
   const [products, setProducts] = useState<Product[]>([])
   const [movements, setMovements] = useState<StockMovement[]>([])
@@ -106,7 +107,7 @@ export function StockPage() {
   const [busy, setBusy] = useState(false)
   const [draftingProductId, setDraftingProductId] = useState<number | null>(null)
   const [toast, setToast] = useState<{ variant: 'success' | 'error'; message: string } | null>(null)
-  const [draftResult, setDraftResult] = useState<{ productName: string; qty: number; stockBefore: number; targetStock: number; demand30d: number | null } | null>(null)
+  const [draftResult, setDraftResult] = useState<{ productName: string; qty: number; stockBefore: number; targetStock: number; demand30d: number | null; isExisting: boolean } | null>(null)
   const [productSignalMap, setProductSignalMap] = useState<Map<number, string[]>>(new Map())
   const [showImport, setShowImport] = useState(false)
   const movementsRef = useRef<HTMLDivElement>(null)
@@ -365,6 +366,7 @@ export function StockPage() {
         stockBefore: res.stock_before,
         targetStock: res.target_stock,
         demand30d: res.prophet_demand_sum_30d,
+        isExisting: res.is_existing_order ?? false,
       })
     } catch (e: unknown) {
       setToast({
@@ -926,11 +928,21 @@ export function StockPage() {
       ) : null}
 
       {draftResult ? (
-        <Modal title={t('stock.draftCreated')} onClose={() => setDraftResult(null)}>
+        <Modal
+          title={draftResult.isExisting ? 'Order Already Exists' : t('stock.draftCreated')}
+          onClose={() => setDraftResult(null)}
+        >
           <div className="space-y-3">
-            <p className="text-sm text-slate-700 dark:text-slate-300">
-              {t('stock.draftCreatedDesc', { name: draftResult.productName })}
-            </p>
+            {draftResult.isExisting ? (
+              <p className="text-sm text-amber-700 dark:text-amber-300">
+                A draft or approved order for <strong>{draftResult.productName}</strong> already exists.
+                Go to Supply Orders to view or manage it.
+              </p>
+            ) : (
+              <p className="text-sm text-slate-700 dark:text-slate-300">
+                {t('stock.draftCreatedDesc', { name: draftResult.productName })}
+              </p>
+            )}
             <div className="grid grid-cols-2 gap-2 rounded-xl bg-slate-50 p-4 dark:bg-white/5">
               <DraftStat label={t('stock.orderQty')} value={formatNumber(draftResult.qty)} accent="violet" />
               <DraftStat label={t('stock.currentStock')} value={formatNumber(draftResult.stockBefore)} />
@@ -943,9 +955,16 @@ export function StockPage() {
               {t('stock.draftReadyNote')}
             </p>
           </div>
-          <div className="mt-4 flex justify-end">
-            <button type="button" onClick={() => setDraftResult(null)} className={primaryButtonClass}>
-              {t('common.confirm')}
+          <div className="mt-4 flex items-center justify-end gap-2">
+            <button type="button" onClick={() => setDraftResult(null)} className="rounded-xl border border-slate-200 px-4 py-2 text-sm text-slate-600 hover:bg-slate-50 dark:border-white/10 dark:text-slate-300 dark:hover:bg-white/5">
+              Close
+            </button>
+            <button
+              type="button"
+              onClick={() => { setDraftResult(null); navigate('/orders'); }}
+              className={primaryButtonClass}
+            >
+              View in Orders →
             </button>
           </div>
         </Modal>

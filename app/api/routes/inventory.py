@@ -225,7 +225,7 @@ def update_supply_order_status(
                     vendor=vendor,
                     receipt_ref=f"Supply Order #{order.id}",
                 ))
-                cashbook_note = f"Tedarik alımı — {product.name} ×{order.quantity}"
+                cashbook_note = f"Supply purchase — {product.name} ×{order.quantity}"
                 if vendor:
                     cashbook_note += f" ({vendor})"
                 cashbook_service.auto_entry_for_expense(
@@ -285,12 +285,14 @@ def create_auto_draft_supply_order(
             ) from e
         raise
 
+    is_existing = meta.get("is_existing_order", False)
     return AutoDraftSupplyResponse(
-        message="Draft supply order created.",
+        message="Existing draft order found." if is_existing else "Draft supply order created.",
         order=SupplyOrderOut.model_validate(order),
         stock_before=meta["stock_before"],
         critical_threshold_used=meta["critical_threshold_used"],
         target_stock=meta["target_stock"],
         quantity_from_target_gap=meta["quantity_from_target_gap"],
         prophet_demand_sum_30d=meta["prophet_demand_sum_30d"],
+        is_existing_order=is_existing,
     )

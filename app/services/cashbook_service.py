@@ -37,7 +37,7 @@ class CashbookService:
             )
         )
         if acc is None:
-            raise NotFoundException("Kasa hesabı bulunamadı.", code="ACCOUNT_NOT_FOUND")
+            raise NotFoundException("Cash account not found.", code="ACCOUNT_NOT_FOUND")
         return acc
 
     def create_account(
@@ -60,7 +60,7 @@ class CashbookService:
                 transaction_type="income",
                 amount=data.opening_balance,
                 balance_after=data.opening_balance,
-                description="Açılış bakiyesi",
+                description="Opening balance",
                 transaction_date=date.today(),
             )
             db.add(tx)
@@ -148,7 +148,7 @@ class CashbookService:
         tenant_id: int,
         amount: Decimal,
         sales_record_id: Optional[int] = None,
-        description: str = "Satış tahsilatı",
+        description: str = "Sales collection",
         reference: Optional[str] = None,
         transaction_date: Optional[date] = None,
     ) -> Optional[CashTransaction]:

@@ -9,7 +9,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from app.core.db import get_db
-from app.core.deps import AuthPrincipal, TenantContext, get_tenant_ctx, require_permission
+from app.core.deps import AuthPrincipal, TenantContext, get_tenant_ctx_or_admin, require_permission
 from app.core.permissions import NLP_QUERY_EXECUTE
 from app.models.tenant import Tenant
 from app.services.ai_copilot_service import ToolContext, run_copilot_stream
@@ -32,7 +32,7 @@ class CopilotChatIn(BaseModel):
 def copilot_chat(
     body: CopilotChatIn,
     principal: Annotated[AuthPrincipal, Depends(require_permission(NLP_QUERY_EXECUTE))],
-    ctx: TenantContext = Depends(get_tenant_ctx),
+    ctx: TenantContext = Depends(get_tenant_ctx_or_admin),
     db: Session = Depends(get_db),
 ) -> StreamingResponse:
     """SSE stream: tool execution status → answer tokens → final payload."""

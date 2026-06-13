@@ -23,18 +23,13 @@ class BriefingItem:
     action_url: Optional[str] = None
 
 
-def _is_en(language: str) -> bool:
-    return not (language or "en").lower().startswith("tr")
-
-
 def build_morning_briefing(
     db: Session,
     *,
     tenant_id: int,
-    language: str = "en",
+    language: str = "en",  # kept for API compatibility; output is always English
     permissions: list[str] | None = None,
 ) -> list[BriefingItem]:
-    en = _is_en(language)
     items: list[BriefingItem] = []
     today = date.today()
     yesterday = today - timedelta(days=1)
@@ -42,36 +37,31 @@ def build_morning_briefing(
 
     # Determine which sections this user can see (None = manager/admin = see all)
     all_access = permissions is None
-    can_stock   = all_access or "stock.adjust" in permissions
-    can_sales   = all_access or "sales.read" in permissions
-    can_finance = all_access or "finance.read" in permissions
-    can_orders  = all_access or "orders.read" in permissions
-    can_tasks   = all_access or "hr.tasks.read" in permissions
+    can_stock   = all_access or "stock.adjust" in (permissions or [])
+    can_sales   = all_access or "sales.read" in (permissions or [])
+    can_orders  = all_access or "orders.read" in (permissions or [])
+    can_tasks   = all_access or "hr.tasks.read" in (permissions or [])
 
     # 1. Critical stock
     if not can_stock:
         critical = []
     else:
         critical = db.scalars(
-        select(Product).where(
-            Product.tenant_id == tenant_id,
-            Product.reorder_level > 0,
-            Product.stock_quantity <= Product.reorder_level,
-        )
-    ).all()
+            select(Product).where(
+                Product.tenant_id == tenant_id,
+                Product.reorder_level > 0,
+                Product.stock_quantity <= Product.reorder_level,
+            )
+        ).all()
     if critical:
         names = ", ".join(p.name for p in critical[:3])
-        if len(critical) > 3:
-            suffix = f" and {len(critical) - 3} more products" if en else f" ve {len(critical) - 3} ürün daha"
-        else:
-            suffix = ""
+        suffix = f" and {len(critical) - 3} more products" if len(critical) > 3 else ""
         items.append(BriefingItem(
-            title=(f"{len(critical)} products at critical stock level" if en
-                   else f"{len(critical)} ürün kritik stok seviyesinde"),
+            title=f"{len(critical)} products at critical stock level",
             body=f"{names}{suffix}",
             priority="high",
             icon="📦",
-            action_label="Go to Stock" if en else "Stoka Git",
+            action_label="Go to Stock",
             action_url="/stock",
         ))
 
@@ -97,22 +87,17 @@ def build_morning_briefing(
                 pct = ((yesterday_sum - week_avg) / week_avg) * 100
                 sign = "+" if pct >= 0 else ""
                 priority = "low" if pct >= -10 else "medium"
-                if en:
-                    direction = "above" if pct >= 0 else "below"
-                    body = f"Yesterday: {yesterday_sum:,.0f} — {sign}{pct:.0f}% {direction} the weekly average."
-                else:
-                    direction = "üstünde" if pct >= 0 else "altında"
-                    body = f"Dün: ₺{yesterday_sum:,.0f} — haftalık ortalamanın {sign}{pct:.0f}% {direction}."
+                direction = "above" if pct >= 0 else "below"
+                body = f"Yesterday: {yesterday_sum:,.0f} — {sign}{pct:.0f}% {direction} the weekly average."
             else:
                 priority = "low"
-                body = (f"Yesterday's sales: {yesterday_sum:,.0f}" if en
-                        else f"Dünkü satış: ₺{yesterday_sum:,.0f}")
+                body = f"Yesterday's sales: {yesterday_sum:,.0f}"
             items.append(BriefingItem(
-                title="Yesterday's sales summary" if en else "Dünkü satış özeti",
+                title="Yesterday's sales summary",
                 body=body,
                 priority=priority,
                 icon="📈",
-                action_label="View Sales" if en else "Satışları Gör",
+                action_label="View Sales",
                 action_url="/sales",
             ))
 
@@ -127,12 +112,11 @@ def build_morning_briefing(
         ) or 0
         if overdue_count > 0:
             items.append(BriefingItem(
-                title=(f"{overdue_count} overdue tasks" if en else f"{overdue_count} gecikmiş görev"),
-                body=("Overdue tasks are waiting to be completed by the team." if en
-                      else "Süresi geçmiş görevler ekip tarafından tamamlanmayı bekliyor."),
+                title=f"{overdue_count} overdue tasks",
+                body="Overdue tasks are waiting to be completed by the team.",
                 priority="high" if overdue_count >= 5 else "medium",
                 icon="✅",
-                action_label="Go to Tasks" if en else "Görevlere Git",
+                action_label="Go to Tasks",
                 action_url="/team",
             ))
 
@@ -146,22 +130,19 @@ def build_morning_briefing(
         ) or 0
         if pending_count > 0:
             items.append(BriefingItem(
-                title=(f"{pending_count} orders awaiting action" if en
-                       else f"{pending_count} sipariş işlem bekliyor"),
-                body=("Customer orders are pending approval or preparation." if en
-                      else "Müşteri siparişleri onay veya hazırlık aşamasında."),
+                title=f"{pending_count} orders awaiting action",
+                body="Customer orders are pending approval or preparation.",
                 priority="medium",
                 icon="🛒",
-                action_label="Go to Orders" if en else "Siparişlere Git",
+                action_label="Go to Orders",
                 action_url="/sales-orders",
             ))
 
     # Fallback — everything looks good
     if not items:
         items.append(BriefingItem(
-            title="All good!" if en else "Her şey yolunda!",
-            body=("No critical issues requiring attention. Have a great day!" if en
-                  else "Dikkat gerektiren kritik bir durum yok. İyi çalışmalar!"),
+            title="All good!",
+            body="No critical issues requiring attention. Have a great day!",
             priority="low",
             icon="✨",
         ))

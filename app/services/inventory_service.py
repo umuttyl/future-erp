@@ -141,6 +141,7 @@ class InventoryService:
                 "quantity_from_target_gap": target_gap,
                 "prophet_demand_sum_30d": prophet_sum,
                 "is_ai_override": is_ai_override,
+                "is_existing_order": True,
             }
             return existing, meta
 

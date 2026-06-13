@@ -33,3 +33,7 @@ class AutoDraftSupplyResponse(BaseModel):
         default=None,
         description="Ürün için Prophet günlük tahminlerinin ilk 30 gün toplamı (varsa)",
     )
+    is_existing_order: bool = Field(
+        default=False,
+        description="True ise yeni sipariş oluşturulmadı — mevcut Draft/Approved sipariş döndürüldü.",
+    )

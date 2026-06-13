@@ -597,7 +597,7 @@ function OrderRow({
                               href={`/invoices/${order.id}/${inv.id}/print`}
                               target="_blank"
                               rel="noopener noreferrer"
-                              title="Fatura PDF Yazdır"
+                              title="Print Invoice PDF"
                               className="flex items-center gap-1 rounded px-2 py-0.5 text-indigo-600 hover:bg-indigo-50 dark:text-indigo-400 dark:hover:bg-indigo-900/20"
                             >
                               <FileText className="h-3.5 w-3.5" />
@@ -605,18 +605,18 @@ function OrderRow({
                             </a>
                             <button
                               type="button"
-                              title="e-Fatura XML İndir (UBL-TR 2.1)"
+                              title="Download e-Invoice XML (UBL-TR 2.1)"
                               onClick={async () => {
                                 try {
                                   await downloadEFaturaXml(order.id, inv.id, inv.invoice_no)
                                 } catch (e) {
-                                  setActionErr('e-Fatura indirilemedi: ' + String(e))
+                                  setActionErr('Failed to download e-Invoice: ' + String(e))
                                 }
                               }}
                               className="flex items-center gap-1 rounded px-2 py-0.5 text-emerald-600 hover:bg-emerald-50 dark:text-emerald-400 dark:hover:bg-emerald-900/20"
                             >
                               <Download className="h-3.5 w-3.5" />
-                              e-Fatura
+                              e-Invoice
                             </button>
                           </div>
                         </li>

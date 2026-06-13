@@ -51,7 +51,7 @@ def ensure_dev_demo_users_if_empty() -> None:
             db.add(User(
                 tenant_id=None,
                 email="admin@demo.example.com",
-                password_hash=hash_password("Admin12345"),
+                password_hash=hash_password("Admin123!"),
                 full_name="Demo Admin",
                 department=None,
                 is_platform_admin=True,

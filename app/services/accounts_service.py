@@ -63,7 +63,7 @@ class AccountsService:
         )
         if customer is None:
             from app.core.exceptions import NotFoundException
-            raise NotFoundException("Müşteri bulunamadı.", code="CUSTOMER_NOT_FOUND")
+            raise NotFoundException("Customer not found.", code="CUSTOMER_NOT_FOUND")
 
         # Opening balance: sum of all movements BEFORE start_date
         opening = Decimal("0")

@@ -106,23 +106,21 @@ def _collect_context(db: Session, tenant_id: int) -> Dict[str, Any]:
 
 
 def _insights_prompt(ctx: Dict[str, Any], language: str = "en") ->str:
-    lang_word = "İngilizce" if not _is_en(language) else "English"
     return (
-        f"Sen bir ERP ve satış analizi uzmanısın. Aşağıdaki işletme verilerini yorumla "
-        "ve yönetici için uygulanabilir içgörüler üret.\n"
+        "You are an ERP and sales analysis expert. Interpret the following business data "
+        "and produce actionable insights for the manager.\n"
         f"{_lang_directive(language)}\n\n"
-        "Çıktı KURALLARI:\n"
-        "- Cevap MUTLAKA geçerli JSON olmalı. Yapı:\n"
+        "Output RULES:\n"
+        "- Response MUST be valid JSON with this structure:\n"
         '  { "highlights": [ { "title": string, "body": string, '
         '"severity": "positive"|"info"|"warning"|"critical", "metric": string? } ], '
         '"headline": string }\n'
-        "- 3 ila 6 adet highlight üret.\n"
-        f"- Her 'title', 'body', 'headline' ve 'metric' metni {lang_word} dilinde olmalı.\n"
-        "- Her 'body' en fazla 2 cümle.\n"
-        "- Yüzde ve rakamları gerçekten verilenlerden türet.\n"
-        "- Kritik stok varsa en az bir warning/critical highlight oluştur.\n"
-        "- Ciro değişimi, en iyi ürünler/müşteriler, aylık trend ve stok durumu hakkında somut önerilerde bulun.\n\n"
-        "İşletme verileri:\n"
+        "- Generate 3 to 6 highlights.\n"
+        "- Keep each 'body' to at most 2 sentences.\n"
+        "- Derive percentages and figures from the actual data provided.\n"
+        "- If critical stock exists, include at least one warning/critical highlight.\n"
+        "- Provide concrete recommendations on revenue change, top products/customers, monthly trend and stock status.\n\n"
+        "Business data:\n"
         + json.dumps(ctx, ensure_ascii=False, default=str)
     )
 
@@ -215,22 +213,20 @@ def _collect_platform_context(db: Session) -> Dict[str, Any]:
 
 def _platform_insights_prompt(ctx: Dict[str, Any], language: str = "en") ->str:
     ctx_slim = {k: v for k, v in ctx.items() if k != "all_tenant_stats"}
-    lang_word = "İngilizce" if not _is_en(language) else "English"
     return (
-        "Sen bir ERP platform analiz uzmanısın. Aşağıdaki PLATFORM GENELİ veriler "
-        "TÜM şirketlere (tenant) aittir. Platform özeti üret.\n"
+        "You are an ERP platform analysis expert. The following PLATFORM-WIDE data "
+        "belongs to ALL companies (tenants). Produce a platform summary.\n"
         f"{_lang_directive(language)}\n\n"
-        "Çıktı KURALLARI:\n"
-        "- Cevap MUTLAKA geçerli JSON olmalı. Yapı:\n"
+        "Output RULES:\n"
+        "- Response MUST be valid JSON with this structure:\n"
         '  { "highlights": [ { "title": string, "body": string, '
         '"severity": "positive"|"info"|"warning"|"critical", "metric": string? } ], '
         '"headline": string }\n'
-        "- 4 ila 6 adet highlight üret.\n"
-        f"- Her 'title', 'body', 'headline' ve 'metric' metni {lang_word} dilinde olmalı.\n"
-        "- Her 'body' en fazla 2 cümle.\n"
-        "- Toplam ciro, en aktif şirketler, sektör dağılımı, kritik stok durumu hakkında platform odaklı içgörüler ver.\n"
-        "- Büyüme trendleri ve öneriler ekle.\n\n"
-        "Platform verileri:\n"
+        "- Generate 4 to 6 highlights.\n"
+        "- Keep each 'body' to at most 2 sentences.\n"
+        "- Provide platform-focused insights on total revenue, most active companies, sector distribution and critical stock.\n"
+        "- Include growth trends and recommendations.\n\n"
+        "Platform data:\n"
         + json.dumps(ctx_slim, ensure_ascii=False, default=str)
     )
 

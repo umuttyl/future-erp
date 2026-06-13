@@ -76,3 +76,4 @@ lerna-debug.log*
 *.tmp
 *.temp
 .cache/
+*.pptx

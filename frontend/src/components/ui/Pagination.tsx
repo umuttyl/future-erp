@@ -25,10 +25,10 @@ export function Pagination({ page, pageSize, total, onChange }: Props) {
   return (
     <div className="flex items-center justify-between border-t border-slate-100 px-1 pt-3 dark:border-white/5">
       <span className="text-xs text-slate-500 dark:text-slate-400">
-        {total} kayıt · Sayfa {page} / {totalPages}
+        {total} records · Page {page} / {totalPages}
       </span>
       <div className="flex items-center gap-1">
-        <NavBtn disabled={page === 1} onClick={() => onChange(page - 1)} aria-label="Önceki sayfa">
+        <NavBtn disabled={page === 1} onClick={() => onChange(page - 1)} aria-label="Previous page">
           <ChevronLeft className="h-4 w-4" />
         </NavBtn>
         {pages.map((p, i) =>
@@ -50,7 +50,7 @@ export function Pagination({ page, pageSize, total, onChange }: Props) {
             </button>
           )
         )}
-        <NavBtn disabled={page === totalPages} onClick={() => onChange(page + 1)} aria-label="Sonraki sayfa">
+        <NavBtn disabled={page === totalPages} onClick={() => onChange(page + 1)} aria-label="Next page">
           <ChevronRight className="h-4 w-4" />
         </NavBtn>
       </div>

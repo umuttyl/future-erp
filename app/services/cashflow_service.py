@@ -47,14 +47,14 @@ class CashflowForecast:
     has_cashbook_data: bool = False
 
 
-_TR_MONTHS = [
-    "Oca", "Şub", "Mar", "Nis", "May", "Haz",
-    "Tem", "Ağu", "Eyl", "Eki", "Kas", "Ara",
+_EN_MONTHS = [
+    "Jan", "Feb", "Mar", "Apr", "May", "Jun",
+    "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
 ]
 
 
-def _tr_date(d: date) -> str:
-    return f"{d.day} {_TR_MONTHS[d.month - 1]}"
+def _fmt_date(d: date) -> str:
+    return f"{d.day} {_EN_MONTHS[d.month - 1]}"
 
 
 def compute_cashflow_forecast(db: Session, *, tenant_id: int) -> CashflowForecast:
@@ -128,8 +128,8 @@ def compute_cashflow_forecast(db: Session, *, tenant_id: int) -> CashflowForecas
     if current_balance < 0:
         overall_status = "danger"
         alert_message = (
-            f"Güncel kasa bakiyeniz negatif: {current_balance:,.0f} ₺. "
-            "Acil nakit girişi gerekiyor."
+            f"Current cash balance is negative: {current_balance:,.0f}. "
+            "Immediate cash inflow required."
         )
     elif first_danger_date:
         overall_status = "danger"
@@ -137,16 +137,16 @@ def compute_cashflow_forecast(db: Session, *, tenant_id: int) -> CashflowForecas
         days_until = (danger_day - today).days
         projected_bal = next(p.balance for p in projection if p.date == first_danger_date)
         alert_message = (
-            f"{days_until} gün içinde ({_tr_date(danger_day)}) nakit açığı oluşabilir. "
-            f"Tahmini bakiye: {projected_bal:,.0f} ₺."
+            f"Cash shortfall may occur in {days_until} days ({_fmt_date(danger_day)}). "
+            f"Projected balance: {projected_bal:,.0f}."
         )
     elif first_warning_date:
         overall_status = "warning"
         warn_day = date.fromisoformat(first_warning_date)
         days_until = (warn_day - today).days
         alert_message = (
-            f"{days_until} gün içinde ({_tr_date(warn_day)}) nakit rezervi düşük seviyeye inecek. "
-            "Tahsilat hızlandırmanızı veya giderleri ertelemenizi öneririz."
+            f"Cash reserves will drop low in {days_until} days ({_fmt_date(warn_day)}). "
+            "Consider accelerating collections or deferring expenses."
         )
 
     return CashflowForecast(

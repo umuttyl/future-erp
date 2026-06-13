@@ -5,7 +5,6 @@
 import {
   ArrowLeft,
   Check,
-  ChevronDown,
   Copy,
   Eye,
   EyeOff,
@@ -254,7 +253,7 @@ function TabSwitcher({ active, onChange }: { active: Tab; onChange: (t: Tab) => 
 // ---------------------------------------------------------------------------
 
 const DEMO_ACCOUNTS = [
-  { slug: '', email: 'admin@demo.example.com', label: 'Platform Admin', role: 'Admin', pw: 'Admin12345' },
+  { slug: '', email: 'admin@demo.example.com', label: 'Platform Admin', role: 'Admin', pw: 'Admin123!' },
 ] as const;
 
 function LoginForm({ onSwitch, onForgot }: { onSwitch: () => void; onForgot: () => void }) {
@@ -268,7 +267,6 @@ function LoginForm({ onSwitch, onForgot }: { onSwitch: () => void; onForgot: () 
   const [email, setEmail]           = useState("");
   const [password, setPassword]     = useState("");
   const [busy, setBusy]             = useState(false);
-  const [demoOpen, setDemoOpen]     = useState(false);
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -297,36 +295,6 @@ function LoginForm({ onSwitch, onForgot }: { onSwitch: () => void; onForgot: () 
 
   return (
     <form className="space-y-4" onSubmit={onSubmit}>
-      {import.meta.env.DEV && (
-        <div className="rounded-xl border border-indigo-100 bg-indigo-50/80 dark:border-indigo-500/20 dark:bg-indigo-950/40">
-          <button
-            type="button"
-            onClick={() => setDemoOpen((o) => !o)}
-            className="flex w-full items-center justify-between px-3 py-2.5 text-[11px] font-semibold text-indigo-800 dark:text-indigo-200"
-          >
-            {t("auth.demoAccounts")}
-            <ChevronDown className={`h-3.5 w-3.5 transition-transform ${demoOpen ? 'rotate-180' : ''}`} />
-          </button>
-          {demoOpen && (
-            <div className="border-t border-indigo-100 px-2 pb-2 dark:border-indigo-500/20">
-              {DEMO_ACCOUNTS.map((acc) => (
-                <button
-                  key={acc.email}
-                  type="button"
-                  onClick={() => fillDemo(acc)}
-                  className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left transition hover:bg-indigo-100/80 dark:hover:bg-indigo-900/40"
-                >
-                  <span className={`min-w-[120px] text-[10px] font-semibold ${acc.role === 'Admin' ? 'text-red-700 dark:text-red-300' : 'text-indigo-700 dark:text-indigo-300'}`}>
-                    {t(`auth.demo.${acc.email.split('@')[0]}`, { defaultValue: acc.label })}
-                  </span>
-                  <span className="font-mono text-[10px] text-indigo-600/80 dark:text-indigo-400/80">{acc.email}</span>
-                  {acc.role !== 'Admin' && <span className="ml-auto font-mono text-[10px] text-indigo-400">·{acc.slug}</span>}
-                </button>
-              ))}
-            </div>
-          )}
-        </div>
-      )}
 
       <div>
         <label className="text-xs font-medium text-slate-600 dark:text-slate-400" htmlFor="login-tenant">

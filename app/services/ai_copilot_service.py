@@ -285,14 +285,14 @@ def _tool_reorder_recommendations(inputs: Dict[str, Any], ctx: ToolContext) -> D
         needs_attention = (
             deficit > 0
             or stock == 0
-            or (days_remaining is not None and days_remaining < 14)
+            or (days_remaining is not None and days_remaining < 7)
         )
         if not needs_attention:
             continue
 
         urgency = "critical" if (deficit > 0 or stock == 0) else "warning"
-        # Suggest order: cover 60 days of sales, at least the deficit
-        suggested_qty = max(deficit, int(daily_sales * 60) - stock) if daily_sales > 0 else deficit
+        # Suggest order: cover 30 days of sales, at least the deficit
+        suggested_qty = max(deficit, int(daily_sales * 30) - stock) if daily_sales > 0 else deficit
 
         recommendations.append({
             "product_id": p.id,

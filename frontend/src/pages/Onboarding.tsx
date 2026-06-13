@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Sparkles } from "lucide-react";
+import { LogOut, Sparkles } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router-dom";
 import {
@@ -35,7 +35,12 @@ const MODULE_EMOJIS: Record<string, string> = {
 export default function OnboardingPage() {
   const navigate = useNavigate();
   const { t } = useTranslation();
-  const { refreshMe } = useAuth();
+  const { refreshMe, logout } = useAuth();
+
+  async function handleBackToLogin() {
+    await logout();
+    navigate("/login", { replace: true });
+  }
   // Backend sektör/modül etiketleri TR gelir; mevcutsa i18n çevirisini, yoksa backend metnini kullan.
   const sectorLabel = (key: string, fallback: string) => t(`onboarding.sector.${key}`, { defaultValue: fallback });
   const sectorDesc = (key: string, fallback: string) => t(`onboarding.sectorDesc.${key}`, { defaultValue: fallback });
@@ -120,6 +125,18 @@ export default function OnboardingPage() {
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 dark:from-gray-900 dark:to-gray-800 py-10 px-4">
       <div className="mx-auto max-w-4xl">
+        {/* Back to login */}
+        <div className="mb-4 flex justify-start">
+          <button
+            type="button"
+            onClick={() => void handleBackToLogin()}
+            className="flex items-center gap-1.5 text-sm text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 transition"
+          >
+            <LogOut className="h-4 w-4" />
+            Back to login
+          </button>
+        </div>
+
         {/* Başlık */}
         <div className="mb-8 text-center">
           <h1 className="text-3xl font-bold text-gray-900 dark:text-white">

@@ -38,7 +38,7 @@ export function AppToast({ message, variant, onDismiss, durationMs = 5200 }: App
         type="button"
         onClick={onDismiss}
         className="shrink-0 rounded-lg p-1 text-slate-500 transition hover:bg-slate-100 hover:text-slate-800 dark:hover:bg-white/10 dark:hover:text-slate-200"
-        aria-label="Kapat"
+        aria-label="Close"
       >
         <X className="h-4 w-4" />
       </button>

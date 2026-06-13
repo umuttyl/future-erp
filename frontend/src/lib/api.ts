@@ -235,6 +235,7 @@ export type AutoDraftSupplyResponse = {
   target_stock: number;
   quantity_from_target_gap: number;
   prophet_demand_sum_30d: number | null;
+  is_existing_order: boolean;
 };
 
 /** Actionable AI: kritik stokta taslak tedarik satırı oluşturur. `isAiOverride`: AI bildirimi — kritik kontrolü atlanır. */

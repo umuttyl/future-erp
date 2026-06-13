@@ -54,7 +54,7 @@ function ToastRow({ item, durationMs, onDismiss }: { item: WsToastItem; duration
         type="button"
         onClick={() => onDismiss(item.id)}
         className="shrink-0 rounded-lg p-1 text-slate-500 transition hover:bg-black/5 dark:hover:bg-white/10"
-        aria-label="Kapat"
+        aria-label="Close"
       >
         <X className="h-4 w-4" />
       </button>
